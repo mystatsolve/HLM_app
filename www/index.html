@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>다층모형분석 (MLM) 웹앱</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ─── 기본 설정 ─── */
+:root {
+  --primary:   #1e3a5f;
+  --accent:    #2563eb;
+  --accent-lt: #dbeafe;
+  --success:   #059669;
+  --warning:   #d97706;
+  --danger:    #dc2626;
+  --bg:        #f1f5f9;
+  --card:      #ffffff;
+  --border:    #e2e8f0;
+  --text:      #1e293b;
+  --muted:     #64748b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+       background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+
+/* ─── 헤더 ─── */
+.header {
+  background: var(--primary); color: #fff;
+  padding: 14px 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.header h1 { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+.header .sub { font-size: 12px; opacity: .75; margin-top: 2px; }
+#api-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; background: rgba(255,255,255,.1);
+  padding: 5px 12px; border-radius: 20px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+.dot.ok { background: #4ade80; }
+.dot.err { background: #f87171; }
+
+/* ─── 레이아웃 ─── */
+.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; display: flex; flex-direction: column; gap: 20px; }
+
+/* ─── 카드 ─── */
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.card-title {
+  font-size: 15px; font-weight: 700; color: var(--primary);
+  margin-bottom: 16px; padding-bottom: 10px;
+  border-bottom: 2px solid var(--accent-lt);
+  display: flex; align-items: center; gap: 8px;
+}
+.step-badge {
+  background: var(--accent); color: #fff;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+
+/* ─── 업로드 존 ─── */
+.upload-zone {
+  border: 2px dashed var(--border); border-radius: 8px;
+  padding: 36px; text-align: center; cursor: pointer;
+  transition: border-color .2s, background .2s;
+  background: #fafbfc;
+}
+.upload-zone:hover, .upload-zone.drag-over {
+  border-color: var(--accent); background: var(--accent-lt);
+}
+.upload-zone input { display: none; }
+.upload-icon { font-size: 36px; margin-bottom: 8px; }
+.upload-zone p { color: var(--muted); font-size: 13px; }
+.upload-zone strong { color: var(--accent); text-decoration: underline; cursor: pointer; }
+#file-info { margin-top: 12px; padding: 10px 14px; background: var(--accent-lt); border-radius: 6px; font-size: 13px; display: none; }
+
+/* ─── 미리보기 테이블 ─── */
+.preview-wrap { overflow-x: auto; margin-top: 14px; max-height: 220px; }
+
+/* ─── 폼 요소 ─── */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+.form-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+label.field-label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
+select.ctrl, input.ctrl {
+  width: 100%; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; color: var(--text);
+  background: #fff; appearance: none;
+  transition: border-color .2s;
+}
+select.ctrl:focus, input.ctrl:focus { outline: none; border-color: var(--accent); }
+
+/* ─── 체크박스 그룹 ─── */
+.check-group {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; max-height: 140px; overflow-y: auto;
+  background: #fafbfc;
+}
+.check-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.check-item input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.check-item label { cursor: pointer; }
+.empty-hint { color: var(--muted); font-size: 12px; padding: 6px 0; }
+
+/* ─── 버튼 ─── */
+.btn {
+  padding: 10px 24px; border: none; border-radius: 6px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity .2s, transform .1s;
+}
+.btn:hover { opacity: .9; }
+.btn:active { transform: scale(.98); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-success { background: var(--success); color: #fff; }
+.btn-lg { padding: 13px 36px; font-size: 15px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ─── 탭 ─── */
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+.tab-btn {
+  padding: 8px 16px; border: none; background: none; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color .2s;
+}
+.tab-btn:hover { color: var(--accent); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ─── 테이블 ─── */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: var(--primary); color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; white-space: nowrap; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: #f8fafc; }
+.sig { font-weight: 700; }
+.sig-3 { color: var(--danger); }
+.sig-2 { color: #c2410c; }
+.sig-1 { color: var(--warning); }
+.sig-0 { color: var(--muted); }
+td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); }
+
+/* ─── ICC / R² 배지 ─── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.stat-box {
+  border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+  background: #fafbfc; text-align: center;
+}
+.stat-box .val { font-size: 26px; font-weight: 700; color: var(--primary); }
+.stat-box .lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.stat-box .hint { font-size: 11px; color: var(--success); margin-top: 4px; font-style: italic; }
+
+/* ─── 섹션 제목 ─── */
+.section-title { font-size: 13px; font-weight: 700; color: var(--primary); margin: 18px 0 10px; padding-left: 8px; border-left: 3px solid var(--accent); }
+
+/* ─── 알림 박스 ─── */
+.alert { padding: 12px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+.alert-info    { background: var(--accent-lt); color: #1d4ed8; }
+.alert-success { background: #d1fae5; color: #065f46; }
+.alert-warning { background: #fef3c7; color: #92400e; }
+.alert-danger  { background: #fee2e2; color: #991b1b; }
+
+/* ─── 로딩 스피너 ─── */
+.spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #ddd; border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading { display: none; text-align: center; padding: 30px; }
+
+/* ─── 차트 ─── */
+.chart-wrap { position: relative; height: 300px; margin-top: 16px; }
+.chart-wrap.tall { height: 420px; }
+
+/* ─── 숨김 ─── */
+.hidden { display: none !important; }
+
+/* ─── LRT 결과 ─── */
+.lrt-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-top: 12px; font-size: 13px; }
+.lrt-box strong { color: var(--primary); }
+</style>
+</head>
+<body>
+
+<!-- ══════════ 헤더 ══════════ -->
+<header class="header">
+  <div>
+    <h1>🔬 다층모형분석 (Multilevel Modeling)</h1>
+    <div class="sub">R lme4 / lmerTest 기반 · 기저모형 → 무선절편 → 무선기울기</div>
+  </div>
+  <div id="api-status">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text">서버 확인 중...</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ══ STEP 1: 데이터 업로드 ══ -->
+  <div class="card">
+    <div class="card-title"><span class="step-badge">1</span> 데이터 업로드</div>
+    <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div class="upload-icon">📂</div>
+      <p><strong>파일 선택</strong> 또는 여기로 드래그 앤 드롭</p>
+      <p style="margin-top:4px">CSV 파일 (UTF-8 인코딩 권장)</p>
+      <input type="file" id="file-input" accept=".csv">
+    </div>
+    <div id="file-info"></div>
+    <div class="preview-wrap" id="preview-wrap"></div>
+  </div>
+
+  <!-- ══ STEP 2: 변수 설정 ══ -->
+  <div class="card hidden" id="card-vars">
+    <div class="card-title"><span class="step-badge">2</span> 변수 설정</div>
+
+    <div class="form-row">
+      <div>
+        <label class="field-label">종속변수 (Outcome)</label>
+        <select class="ctrl" id="sel-outcome">
+          <option value="">-- 선택 --</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">집단변수 Level-2 (Grouping)</label>
+        <select class="ctrl" id="sel-group">
+          <option value="">-- 선택 --</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label class="field-label">Level-1 독립변수 (개인 수준)</label>
+        <div class="check-group" id="chk-l1">
+          <span class="empty-hint">변수를 로드하면 나타납니다.</span>
+        </div>
+      </div>
+      <div>
+        <label class="field-label">Level-2 공변량 (집단 수준, 선택)</label>
+        <div class="check-group" id="chk-l2">
+          <span class="empty-hint">변수를 로드하면 나타납니다.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 3: 모형 설정 ══ -->
+  <div class="card hidden" id="card-model">
+    <div class="card-title"><span class="step-badge">3</span> 모형 설정 및 분석 실행</div>
+
+    <div style="margin-bottom:16px">
+      <label class="field-label">무선기울기 변수 (선택 · Level-1 변수에서)</label>
+      <div class="check-group" id="chk-rs" style="max-height:100px">
+        <span class="empty-hint">Level-1 독립변수를 선택하면 나타납니다.</span>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:6px">
+        ※ 선택 시 무선기울기 모형(Model 2)을 추가로 적합합니다. 샘플이 작으면 수렴 실패 가능.
+      </p>
+    </div>
+
+    <div style="text-align:center; margin-top:10px">
+      <button class="btn btn-success btn-lg" id="btn-run" onclick="runAnalysis()" disabled>
+        ▶ 분석 실행
+      </button>
+    </div>
+    <div id="loading">
+      <div class="spinner"></div> R 서버에서 분석 중... 잠시 기다려 주세요.
+    </div>
+  </div>
+
+  <!-- ══ STEP 4: 결과 ══ -->
+  <div class="card hidden" id="card-results">
+    <div class="card-title"><span class="step-badge">4</span> 분석 결과</div>
+
+    <div class="tabs" id="result-tabs">
+      <button class="tab-btn active" onclick="switchTab('tab-info',this)">📋 데이터 정보</button>
+      <button class="tab-btn" onclick="switchTab('tab-null',this)">M0 기저모형</button>
+      <button class="tab-btn" id="tab-ri-btn" onclick="switchTab('tab-ri',this)">M1 무선절편</button>
+      <button class="tab-btn" id="tab-rs-btn" onclick="switchTab('tab-rs',this)">M2 무선기울기</button>
+      <button class="tab-btn" onclick="switchTab('tab-comp',this)">📊 모형 비교</button>
+    </div>
+
+    <!-- 데이터 정보 -->
+    <div class="tab-pane active" id="tab-info">
+      <div class="stat-grid" id="info-stats"></div>
+      <div id="info-alert"></div>
+    </div>
+
+    <!-- M0 기저모형 -->
+    <div class="tab-pane" id="tab-null">
+      <div class="stat-grid" id="null-stats"></div>
+      <div class="section-title">무선효과 (Random Effects)</div>
+      <div class="tbl-wrap" id="null-re-tbl"></div>
+      <div class="section-title">모형 공식</div>
+      <code id="null-formula" style="font-size:13px; color:var(--muted)"></code>
+    </div>
+
+    <!-- M1 무선절편 -->
+    <div class="tab-pane" id="tab-ri">
+      <div id="ri-content">
+        <div class="alert alert-info">Level-1/2 독립변수를 선택해야 이 모형이 적합됩니다.</div>
+      </div>
+    </div>
+
+    <!-- M2 무선기울기 -->
+    <div class="tab-pane" id="tab-rs">
+      <div id="rs-content">
+        <div class="alert alert-info">무선기울기 변수를 선택해야 이 모형이 적합됩니다.</div>
+      </div>
+    </div>
+
+    <!-- 모형 비교 -->
+    <div class="tab-pane" id="tab-comp">
+      <div class="tbl-wrap" id="comp-tbl"></div>
+      <div class="chart-wrap" id="comp-chart-wrap">
+        <canvas id="comp-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// plumber가 스칼라를 배열로 직렬화할 때 대비: 단일 요소 스칼라 배열만 언박싱
+function deepUnbox(obj) {
+  if (Array.isArray(obj)) {
+    // 객체를 담은 배열(진짜 배열)은 유지, 스칼라 배열([20],[true])만 언박싱
+    if (obj.length === 1 && (typeof obj[0] !== 'object' || obj[0] === null)) {
+      return deepUnbox(obj[0]);
+    }
+    return obj.map(deepUnbox);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const r = {};
+    for (const [k, v] of Object.entries(obj)) r[k] = deepUnbox(v);
+    return r;
+  }
+  return obj;
+}
+const u = v => Array.isArray(v) ? v[0] : v;
+
+// ════════════════════════════════════════
+//  전역 상태
+// ════════════════════════════════════════
+const API_BASE = 'http://localhost:8000';
+let parsedData   = [];   // 원본 행 배열
+let columnData   = {};   // 컬럼 형식 { colName: [values...] }
+let allColumns   = [];
+let lastResult   = null;
+let compChart    = null;
+
+// ════════════════════════════════════════
+//  API 상태 확인
+// ════════════════════════════════════════
+async function checkApiStatus() {
+  try {
+    const res  = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000) });
+    const data = await res.json();
+    document.getElementById('status-dot').className  = 'dot ok';
+    document.getElementById('status-text').textContent =
+      `R ${data.R} · lme4 ${data.lme4} · lmerTest ${data.lmerTest}`;
+  } catch {
+    document.getElementById('status-dot').className  = 'dot err';
+    document.getElementById('status-text').textContent = 'API 서버 연결 실패';
+  }
+}
+checkApiStatus();
+setInterval(checkApiStatus, 30000);
+
+// ════════════════════════════════════════
+//  파일 업로드 / CSV 파싱
+// ════════════════════════════════════════
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) handleFile(file);
+});
+
+function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    alert('CSV 파일만 지원합니다.');
+    return;
+  }
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true, dynamicTyping: false,
+    complete(results) {
+      parsedData = results.data;
+      allColumns = results.meta.fields || [];
+      buildColumnData();
+      showFileInfo(file, results);
+      renderPreview(results.data.slice(0, 6), allColumns);
+      buildVariableSelectors();
+      document.getElementById('card-vars').classList.remove('hidden');
+      document.getElementById('card-model').classList.remove('hidden');
+    },
+    error(err) { alert('CSV 파싱 오류: ' + err.message); }
+  });
+}
+
+// 행 형식 → 컬럼 형식 변환
+function buildColumnData() {
+  columnData = {};
+  allColumns.forEach(col => { columnData[col] = []; });
+  parsedData.forEach(row => {
+    allColumns.forEach(col => {
+      const v = row[col];
+      const n = parseFloat(v);
+      columnData[col].push(isNaN(n) ? v : n);
+    });
+  });
+}
+
+function showFileInfo(file, results) {
+  const el = document.getElementById('file-info');
+  el.style.display = 'block';
+  el.innerHTML = `📄 <strong>${file.name}</strong> &nbsp;|&nbsp; 행: <strong>${results.data.length}</strong> &nbsp;|&nbsp; 열: <strong>${allColumns.length}</strong> &nbsp;|&nbsp; 컬럼: ${allColumns.join(', ')}`;
+}
+
+function renderPreview(rows, cols) {
+  let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += '<tr>' + cols.map(c => `<td>${r[c] ?? ''}</td>`).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('preview-wrap').innerHTML = html;
+}
+
+// ════════════════════════════════════════
+//  변수 선택기 구성
+// ════════════════════════════════════════
+function buildVariableSelectors() {
+  const outcome = document.getElementById('sel-outcome');
+  const group   = document.getElementById('sel-group');
+
+  // 드롭다운
+  [outcome, group].forEach(sel => {
+    sel.innerHTML = '<option value="">-- 선택 --</option>';
+    allColumns.forEach(col => {
+      sel.innerHTML += `<option value="${col}">${col}</option>`;
+    });
+    sel.onchange = onVarChange;
+  });
+
+  // 체크박스 그룹
+  renderCheckGroup('chk-l1', allColumns, 'l1');
+  renderCheckGroup('chk-l2', allColumns, 'l2');
+  renderCheckGroup('chk-rs', [], 'rs');
+}
+
+function renderCheckGroup(id, cols, prefix) {
+  const el = document.getElementById(id);
+  if (cols.length === 0) {
+    el.innerHTML = '<span class="empty-hint">Level-1 독립변수를 먼저 선택하세요.</span>';
+    return;
+  }
+  // rs 체크박스는 onchange 없음 (달면 체크 즉시 재렌더링되어 선택이 사라짐)
+  const onch = prefix !== 'rs' ? ' onchange="onVarChange()"' : '';
+  el.innerHTML = cols.map(col =>
+    `<div class="check-item">
+       <input type="checkbox" id="${prefix}_${col}" value="${col}"${onch}>
+       <label for="${prefix}_${col}">${col}</label>
+     </div>`
+  ).join('');
+}
+
+function getChecked(prefix) {
+  return [...document.querySelectorAll(`input[id^="${prefix}_"]:checked`)].map(el => el.value);
+}
+
+function onVarChange() {
+  const l1 = getChecked('l1');
+  const prevRs = getChecked('rs');          // L1 변경 전 rs 선택 저장
+  renderCheckGroup('chk-rs', l1, 'rs');
+  // 아직 유효한 rs 선택 복원 (L1에 여전히 있는 변수만)
+  prevRs.forEach(col => {
+    const cb = document.getElementById(`rs_${col}`);
+    if (cb) cb.checked = true;
+  });
+  validateRunBtn();
+}
+
+function validateRunBtn() {
+  const outcome = document.getElementById('sel-outcome').value;
+  const group   = document.getElementById('sel-group').value;
+  document.getElementById('btn-run').disabled = !(outcome && group);
+}
+
+// ════════════════════════════════════════
+//  분석 실행
+// ════════════════════════════════════════
+async function runAnalysis() {
+  const outcome   = document.getElementById('sel-outcome').value;
+  const group_var = document.getElementById('sel-group').value;
+  const l1_preds  = getChecked('l1');
+  const l2_covs   = getChecked('l2');
+  const rand_slopes = getChecked('rs');
+
+  if (!outcome || !group_var) { alert('종속변수와 집단변수를 선택해 주세요.'); return; }
+
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('card-results').classList.add('hidden');
+
+  const payload = { data: columnData, outcome, group_var, l1_preds, l2_covs, rand_slopes };
+
+  try {
+    const res  = await fetch(`${API_BASE}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const raw  = await res.json();
+    const data = deepUnbox(raw);   // plumber 배열 직렬화 정규화
+
+    if (!data.success) {
+      alert('분석 오류: ' + (data.error || JSON.stringify(raw).slice(0, 200)));
+    } else {
+      lastResult = data;
+      renderResults(data);
+      document.getElementById('card-results').classList.remove('hidden');
+      document.getElementById('card-results').scrollIntoView({ behavior: 'smooth' });
+    }
+  } catch (e) {
+    alert('서버 연결 실패: ' + e.message);
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('btn-run').disabled = false;
+  }
+}
+
+// ════════════════════════════════════════
+//  결과 렌더링
+// ════════════════════════════════════════
+function renderResults(d) {
+  renderInfoTab(d);
+  renderNullTab(d.null_model, d.data_info);
+  renderRITab(d.ri_model);
+  renderRSTab(d.rs_model, d.rs_model_error);
+  renderCompTab(d.model_comparison);
+
+  // 탭 버튼 활성화
+  document.getElementById('tab-ri-btn').style.opacity = d.ri_model ? '1' : '.4';
+  document.getElementById('tab-rs-btn').style.opacity = d.rs_model ? '1' : '.4';
+
+  // 첫 탭으로 초기화
+  switchTab('tab-info', document.querySelector('.tab-btn'));
+}
+
+// ── 데이터 정보 ──
+function renderInfoTab(d) {
+  const info = d.data_info;
+  if (!info) {
+    document.getElementById('info-stats').innerHTML =
+      '<div class="alert alert-danger">데이터 정보를 받지 못했습니다. 브라우저 콘솔(F12)에서 오류를 확인하세요.</div>';
+    console.error('API 응답:', d);
+    return;
+  }
+  const nObs    = u(info.n_obs);
+  const nGroups = u(info.n_groups);
+  document.getElementById('info-stats').innerHTML = `
+    ${statBox(nObs,    '관측치 수 (N)')}
+    ${statBox(nGroups, '집단 수')}
+    ${statBox((nObs / nGroups).toFixed(1), '집단당 평균 관측치')}
+    ${statBox(u(info.outcome),   '종속변수')}
+    ${statBox(u(info.group_var), '집단변수')}
+  `;
+
+  let alerts = '';
+  if (d.null_model?.icc !== null && d.null_model?.icc !== undefined) {
+    const icc = d.null_model.icc;
+    if (icc < 0.05) {
+      alerts += alert_box('info', `ICC = ${icc} — 집단 간 분산이 작습니다. 다층모형의 필요성을 재검토하세요.`);
+    } else {
+      alerts += alert_box('success', `ICC = ${icc} — 종속변수 분산의 약 ${(icc*100).toFixed(1)}%가 집단 간 차이로 설명됩니다. 다층모형이 적합합니다.`);
+    }
+  }
+  if (d.rs_model_error) alerts += alert_box('warning', '무선기울기 모형: ' + d.rs_model_error);
+  document.getElementById('info-alert').innerHTML = alerts;
+}
+
+// ── 기저모형 ──
+function renderNullTab(m, info) {
+  if (!m) return;
+  document.getElementById('null-stats').innerHTML =
+    statBox(m.icc ?? 'N/A', 'ICC', iccHint(m.icc)) +
+    statBox(m.fit.AIC, 'AIC') +
+    statBox(m.fit.BIC, 'BIC') +
+    statBox(m.fit.logLik, 'Log-Likelihood') +
+    statBox(m.fit.deviance, 'Deviance (-2LL)') +
+    statBox(m.fit.npar, '파라미터 수');
+
+  document.getElementById('null-re-tbl').innerHTML = randomEffectTable(m.random_effects);
+  document.getElementById('null-formula').textContent = m.formula;
+}
+
+// ── 무선절편 모형 ──
+function renderRITab(m) {
+  const el = document.getElementById('ri-content');
+  if (!m) {
+    el.innerHTML = '<div class="alert alert-info">Level-1 또는 Level-2 독립변수를 선택해야 이 모형이 적합됩니다.</div>';
+    return;
+  }
+  let html = `
+    <div class="stat-grid">
+      ${statBox(m.icc ?? 'N/A', 'ICC', iccHint(m.icc))}
+      ${m.r2 ? statBox(m.r2.marginal, '한계적 R² (Marginal)') : ''}
+      ${m.r2 ? statBox(m.r2.conditional, '조건적 R² (Conditional)') : ''}
+      ${statBox(m.fit.AIC, 'AIC')}
+      ${statBox(m.fit.BIC, 'BIC')}
+      ${statBox(m.fit.npar, '파라미터 수')}
+    </div>
+    <div class="section-title">고정효과 (Fixed Effects)</div>
+    <div class="tbl-wrap">${fixedEffectTable(m.fixed_effects)}</div>
+    <div class="section-title">무선효과 (Random Effects)</div>
+    <div class="tbl-wrap">${randomEffectTable(m.random_effects)}</div>`;
+
+  if (m.lrt_vs_null) {
+    html += lrtBox('기저모형(M0) 대비', m.lrt_vs_null);
+  }
+  html += `<div class="section-title">모형 공식</div><code style="font-size:12px;color:var(--muted)">${m.formula}</code>`;
+  el.innerHTML = html;
+}
+
+// ── 무선기울기 모형 ──
+function renderRSTab(m, err) {
+  const el = document.getElementById('rs-content');
+  if (err) {
+    el.innerHTML = `<div class="alert alert-warning">⚠️ ${err}</div>`;
+    return;
+  }
+  if (!m) {
+    el.innerHTML = '<div class="alert alert-info">무선기울기 변수를 선택해야 이 모형이 적합됩니다.</div>';
+    return;
+  }
+  let html = `
+    <div class="stat-grid">
+      ${statBox(m.icc ?? 'N/A', 'ICC', iccHint(m.icc))}
+      ${m.r2 ? statBox(m.r2.marginal, '한계적 R²') : ''}
+      ${m.r2 ? statBox(m.r2.conditional, '조건적 R²') : ''}
+      ${statBox(m.fit.AIC, 'AIC')}
+      ${statBox(m.fit.BIC, 'BIC')}
+      ${statBox(m.fit.npar, '파라미터 수')}
+    </div>
+    <div class="section-title">고정효과 (Fixed Effects)</div>
+    <div class="tbl-wrap">${fixedEffectTable(m.fixed_effects)}</div>
+    <div class="section-title">무선효과 (Random Effects)</div>
+    <div class="tbl-wrap">${randomEffectTable(m.random_effects)}</div>`;
+
+  if (m.lrt_vs_ri) {
+    html += lrtBox('무선절편모형(M1) 대비', m.lrt_vs_ri);
+  }
+  html += `<div class="section-title">모형 공식</div><code style="font-size:12px;color:var(--muted)">${m.formula}</code>`;
+  el.innerHTML = html;
+}
+
+// ── 모형 비교 ──
+function renderCompTab(comp) {
+  if (!comp || comp.length === 0) return;
+
+  let html = `<table>
+    <thead><tr>
+      <th>모형</th><th>파라미터</th><th>AIC</th><th>BIC</th>
+      <th>logLik</th><th>Deviance</th><th>△Deviance</th>
+      <th>χ²</th><th>df</th><th>p</th>
+    </tr></thead><tbody>`;
+
+  comp.forEach(m => {
+    const best_aic = comp.reduce((a, b) => a.AIC < b.AIC ? a : b);
+    const is_best  = m.AIC === best_aic.AIC;
+    html += `<tr style="${is_best ? 'background:#f0fdf4' : ''}">
+      <td><strong>${m.name}</strong>${is_best ? ' ★' : ''}</td>
+      <td>${m.npar ?? '-'}</td>
+      <td>${fmt(m.AIC)}</td>
+      <td>${fmt(m.BIC)}</td>
+      <td>${fmt(m.logLik)}</td>
+      <td>${fmt(m.deviance)}</td>
+      <td>${m.delta_deviance != null && !isNaN(m.delta_deviance) ? fmt(m.delta_deviance) : '-'}</td>
+      <td>${m.chi2  != null && !isNaN(m.chi2)  ? fmt(m.chi2) : '-'}</td>
+      <td>${m.df_chi != null && !isNaN(m.df_chi) ? m.df_chi : '-'}</td>
+      <td>${m.p_chi != null && !isNaN(m.p_chi) ? pSig(m.p_chi) : '-'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  html += `<p style="font-size:11px;color:var(--muted);margin-top:8px">
+    ★ AIC가 가장 낮은 모형. &nbsp; p: 이전 모형과의 카이제곱 검정 (ML 추정). &nbsp; △Deviance = 이전 모형 Deviance - 현재 모형 Deviance
+  </p>`;
+  document.getElementById('comp-tbl').innerHTML = html;
+
+  // AIC/BIC 차트
+  renderCompChart(comp);
+}
+
+function renderCompChart(comp) {
+  if (compChart) { compChart.destroy(); compChart = null; }
+  const labels = comp.map(m => m.name.replace('Model ', 'M'));
+  const aics   = comp.map(m => m.AIC);
+  const bics   = comp.map(m => m.BIC);
+
+  compChart = new Chart(document.getElementById('comp-chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'AIC', data: aics, backgroundColor: 'rgba(37,99,235,.7)', borderRadius: 4 },
+        { label: 'BIC', data: bics, backgroundColor: 'rgba(5,150,105,.7)', borderRadius: 4 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
+        title:  { display: true, text: 'AIC / BIC 비교 (낮을수록 적합)', font: { size: 13 } }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          title: { display: true, text: '정보기준 값' }
+        }
+      }
+    }
+  });
+}
+
+// ════════════════════════════════════════
+//  HTML 생성 헬퍼
+// ════════════════════════════════════════
+function statBox(val, label, hint = '') {
+  return `<div class="stat-box">
+    <div class="val">${val}</div>
+    <div class="lbl">${label}</div>
+    ${hint ? `<div class="hint">${hint}</div>` : ''}
+  </div>`;
+}
+
+function iccHint(icc) {
+  if (icc === null || icc === undefined || isNaN(icc)) return '';
+  if (icc < 0.05)  return '집단 효과 미미';
+  if (icc < 0.15)  return '집단 효과 소';
+  if (icc < 0.25)  return '집단 효과 중';
+  return '집단 효과 대';
+}
+
+function alert_box(type, msg) {
+  return `<div class="alert alert-${type}">${msg}</div>`;
+}
+
+function fixedEffectTable(fes) {
+  if (!fes || fes.length === 0) return '<p style="color:var(--muted)">고정효과 없음</p>';
+  let html = `<table>
+    <thead><tr>
+      <th>변수명</th><th>추정값 (B)</th><th>표준오차 (SE)</th>
+      <th>t값</th><th>p값</th><th>95% CI 하한</th><th>95% CI 상한</th><th>유의성</th>
+    </tr></thead><tbody>`;
+  fes.forEach(fe => {
+    html += `<tr>
+      <td><strong>${fe.term}</strong></td>
+      <td>${fmt(fe.estimate)}</td>
+      <td>${fmt(fe.se)}</td>
+      <td>${fmt(fe.t)}</td>
+      <td>${fe.p != null ? fmt(fe.p) : '-'}</td>
+      <td>${fe.ci_lower != null ? fmt(fe.ci_lower) : '-'}</td>
+      <td>${fe.ci_upper != null ? fmt(fe.ci_upper) : '-'}</td>
+      <td>${fe.p != null ? pSig(fe.p) : '-'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>
+    <p style="font-size:11px;color:var(--muted);margin-top:6px">
+      유의수준: *** p&lt;.001 &nbsp; ** p&lt;.01 &nbsp; * p&lt;.05 &nbsp; † p&lt;.1
+    </p>`;
+  return html;
+}
+
+function randomEffectTable(res) {
+  if (!res || res.length === 0) return '<p style="color:var(--muted)">무선효과 없음</p>';
+  let html = `<table>
+    <thead><tr><th>집단</th><th>변수1</th><th>변수2</th><th>분산</th><th>표준편차</th></tr></thead><tbody>`;
+  res.forEach(re => {
+    html += `<tr>
+      <td>${re.group}</td>
+      <td>${re.var1 || '-'}</td>
+      <td>${re.var2 || '-'}</td>
+      <td>${fmt(re.vcov)}</td>
+      <td>${fmt(re.sdcor)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function lrtBox(label, lrt) {
+  if (!lrt) return '';
+  const sig = lrt.p < .05 ? '✅ 통계적으로 유의' : '❌ 통계적으로 유의하지 않음';
+  return `<div class="lrt-box" style="margin-top:14px">
+    <strong>${label} 우도비 검정 (LRT)</strong><br>
+    χ²(${lrt.df}) = ${fmt(lrt.chi2)}, p = ${fmt(lrt.p)} &nbsp;→&nbsp; ${sig}
+  </div>`;
+}
+
+function pSig(p) {
+  if (p === null || p === undefined || isNaN(p)) return '-';
+  let stars = '';
+  if (p < .001) stars = '***';
+  else if (p < .01)  stars = '**';
+  else if (p < .05)  stars = '*';
+  else if (p < .10)  stars = '†';
+  const cls = p < .001 ? 'sig-3' : p < .01 ? 'sig-2' : p < .05 ? 'sig-1' : 'sig-0';
+  return `<span class="sig ${cls}">${fmt(p)} ${stars}</span>`;
+}
+
+function fmt(v) {
+  if (Array.isArray(v)) v = v[0];  // plumber 배열 언박싱
+  if (v === null || v === undefined || v === 'NA' || (typeof v === 'number' && isNaN(v))) return '-';
+  if (typeof v === 'string') return v;
+  return Number.isInteger(v) ? v : parseFloat(v.toFixed(4));
+}
+
+// ════════════════════════════════════════
+//  탭 전환
+// ════════════════════════════════════════
+function switchTab(paneId, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(paneId).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+</script>
+</body>
+</html>
