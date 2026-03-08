@@ -18,12 +18,12 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b 1
 )
 
-echo [2단계] R API 서버 시작 (포트: 8000)
+echo [2단계] R API 서버 시작 (포트: 8001)
 echo.
-echo  브라우저에서 http://localhost:8000 을 열어주세요.
+echo  브라우저에서 http://localhost:8001 을 열어주세요.
 echo  종료: Ctrl+C
 echo.
 
-Rscript -e "library(plumber); pr <- plumb('api.R'); pr_run(pr, host='127.0.0.1', port=8000, docs=FALSE)"
+Rscript -e "library(plumber); pr <- plumb('api.R'); pr_run(pr, host='127.0.0.1', port=8001, docs=FALSE)"
 
 pause

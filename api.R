@@ -182,10 +182,8 @@ function(req) {
     )
 
     # ── Model 0: 기저모형 (Null) ──────────────────────────────────
-    message("[DBG] fitting m0")
     f0 <- as.formula(paste0(outcome, " ~ 1 + (1|", group_var, ")"))
     m0 <- suppressWarnings(lmer(f0, data = df, REML = FALSE))
-    message("[DBG] m0 done, class=", class(m0)[1])
 
     result$null_model <- list(
       formula        = deparse(f0),
@@ -200,11 +198,8 @@ function(req) {
       f1_str <- paste0(outcome, " ~ ",
                        paste(all_fixed, collapse = " + "),
                        " + (1|", group_var, ")")
-      message("[DBG] fitting m1")
       m1 <- suppressWarnings(lmer(as.formula(f1_str), data = df, REML = FALSE))
-      message("[DBG] m1 done, anova...")
       lrt01 <- suppressWarnings(anova(m0, m1))
-      message("[DBG] lrt01 done, class=", class(lrt01)[1], " names=", paste(names(lrt01),collapse=","))
 
       result$ri_model <- list(
         formula        = f1_str,
@@ -228,7 +223,6 @@ function(req) {
                          paste(all_fixed, collapse = " + "),
                          " + (", slope_part, "|", group_var, ")")
 
-        message("[DBG] fitting m2: ", f2_str)
         # 에러 시 문자열 반환 → is.character()로 판별 (S4 모형에 $ 사용 금지)
         m2 <- tryCatch(
           suppressWarnings(
@@ -239,7 +233,6 @@ function(req) {
           error = function(e) e$message
         )
 
-        message("[DBG] m2 is.character=", is.character(m2))
         if (is.character(m2)) {
           result$rs_model_error <- paste0("수렴 실패: ", m2)
         } else {
