@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>다층모형분석 (MLM) 웹앱</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -552,6 +555,17 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
     </div>
 
     <div style="margin-bottom:16px">
+      <label class="field-label">공분산 구조 (Covariance Structure)</label>
+      <select id="cov-struct" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px">
+        <option value="un" selected>Unstructured (비구조적) — 분산·공분산 모두 추정</option>
+        <option value="ind">Independent (독립) — 분산만 추정, 공분산 = 0</option>
+      </select>
+      <p style="font-size:12px;color:var(--muted);margin-top:6px">
+        ※ 무선기울기 모형(Model 2, 3)에 적용됩니다. Independent 선택 시 무선효과 간 공분산을 0으로 제약합니다.
+      </p>
+    </div>
+
+    <div style="margin-bottom:16px">
       <label class="field-label">교차수준 상호작용 (Cross-Level Interaction, 선택)</label>
       <div class="check-group" id="chk-cross" style="max-height:140px">
         <span class="empty-hint">L1·L2 독립변수를 각각 1개 이상 선택하면 상호작용 항이 표시됩니다.</span>
@@ -595,6 +609,8 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
     <!-- M0 기저모형 -->
     <div class="tab-pane" id="tab-null">
       <div class="stat-grid" id="null-stats"></div>
+      <div class="section-title">고정효과 (Fixed Effects)</div>
+      <div class="tbl-wrap" id="null-fe-tbl"></div>
       <div class="section-title">무선효과 (Random Effects)</div>
       <div class="tbl-wrap" id="null-re-tbl"></div>
       <div class="section-title">모형 공식</div>
@@ -936,7 +952,8 @@ async function runAnalysis() {
   const cross_interactions = getCrossInteractions();
   const l1_centering = document.getElementById('sel-l1-centering').value;
   const l2_centering = document.getElementById('sel-l2-centering').value;
-  const payload = { data: columnData, outcome, group_var, l1_preds, l2_covs, rand_slopes, cross_interactions, l1_centering, l2_centering };
+  const cov_struct = document.getElementById('cov-struct').value;
+  const payload = { data: columnData, outcome, group_var, l1_preds, l2_covs, rand_slopes, cross_interactions, l1_centering, l2_centering, cov_struct };
 
   try {
     const res  = await fetch(`${API_BASE}/api/analyze`, {
@@ -1031,13 +1048,16 @@ function renderNullTab(m, info) {
   if (!m) return;
   document.getElementById('null-stats').innerHTML =
     statBox(m.icc ?? 'N/A', 'ICC', iccHint(m.icc)) +
+    (m.r2 ? statBox(m.r2.marginal, '한계적 R² (Marginal)') : '') +
+    (m.r2 ? statBox(m.r2.conditional, '조건적 R² (Conditional)') : '') +
     statBox(m.fit.AIC, 'AIC') +
     statBox(m.fit.BIC, 'BIC') +
     statBox(m.fit.logLik, 'Log-Likelihood') +
     statBox(m.fit.deviance, 'Deviance (-2LL)') +
     statBox(m.fit.npar, '파라미터 수');
 
-  document.getElementById('null-re-tbl').innerHTML = randomEffectTable(m.random_effects);
+  document.getElementById('null-fe-tbl').innerHTML = m.fixed_effects ? fixedEffectTable(m.fixed_effects) : '<div style="color:var(--muted)">고정효과 없음</div>';
+  document.getElementById('null-re-tbl').innerHTML = randomEffectTable(m.random_effects) + lrtVsLmBox(m.lrt_vs_lm);
   document.getElementById('null-formula').textContent = m.formula;
 }
 
@@ -1065,6 +1085,7 @@ function renderRITab(m) {
   if (m.lrt_vs_null) {
     html += lrtBox('기저모형(M0) 대비', m.lrt_vs_null);
   }
+  html += lrtVsLmBox(m.lrt_vs_lm);
   html += `<div class="section-title">모형 공식</div><code style="font-size:12px;color:var(--muted)">${m.formula}</code>`;
   el.innerHTML = html;
 }
@@ -1097,6 +1118,7 @@ function renderRSTab(m, err) {
   if (m.lrt_vs_ri) {
     html += lrtBox('무선절편모형(M1) 대비', m.lrt_vs_ri);
   }
+  html += lrtVsLmBox(m.lrt_vs_lm);
   html += `<div class="section-title">모형 공식</div><code style="font-size:12px;color:var(--muted)">${m.formula}</code>`;
   el.innerHTML = html;
 }
@@ -1221,27 +1243,31 @@ function fixedEffectTable(fes) {
 function randomEffectTable(res) {
   if (!res || res.length === 0) return '<p style="color:var(--muted)">무선효과 없음</p>';
   let html = `<table>
-    <thead><tr><th>집단</th><th>효과</th><th>유형</th><th>추정값</th><th>SD / 상관</th></tr></thead><tbody>`;
+    <thead><tr><th>효과</th><th>Estimate</th><th>Std. Err.</th><th>95% CI 하한</th><th>95% CI 상한</th></tr></thead><tbody>`;
   res.forEach(re => {
-    const isCov = re.var2 && re.var2 !== '';
     const isResid = re.group === 'Residual';
-    const typeLbl = isCov ? '공분산' : (isResid ? '잔차 분산' : '분산');
-    const sdLbl   = isCov ? `${fmt(re.sdcor)} <span style="font-size:11px;color:var(--muted)">(상관)</span>`
-                          : `${fmt(re.sdcor)} <span style="font-size:11px;color:var(--muted)">(SD)</span>`;
-    const effect  = isCov ? `${re.var1} &amp; ${re.var2}` : (re.var1 || '-');
-    const rowBg   = isCov ? ' style="background:#fef3c7"' : '';
-    html += `<tr${rowBg}>
-      <td>${re.group}</td>
-      <td>${effect}</td>
-      <td><span style="font-size:12px;font-weight:600;color:${isCov ? 'var(--warning)' : 'var(--primary)'}">${typeLbl}</span></td>
-      <td>${fmt(re.vcov)}</td>
-      <td>${sdLbl}</td>
+    const isCov   = re.var2 && re.var2 !== '';
+    let label;
+    if (isResid) {
+      label = 'var(Residual)';
+    } else if (isCov) {
+      const v1 = re.var1 === '(Intercept)' ? '_cons' : re.var1;
+      const v2 = re.var2 === '(Intercept)' ? '_cons' : re.var2;
+      label = `cov(${v1},${v2})`;
+    } else {
+      label = `var(${re.var1 || 'Intercept'})`;
+    }
+    html += `<tr>
+      <td>${label}</td>
+      <td>${fmt(re.estimate)}</td>
+      <td>${fmt(re.se)}</td>
+      <td>${fmt(re.ci_lower)}</td>
+      <td>${fmt(re.ci_upper)}</td>
     </tr>`;
   });
   html += '</tbody></table>';
   html += `<p style="font-size:11px;color:var(--muted);margin-top:6px">
-    분산 행: 추정값 = 분산(τ²), SD/상관 = 표준편차(τ) &nbsp;|&nbsp;
-    <span style="background:#fef3c7;padding:1px 4px;border-radius:2px">공분산 행</span>: 추정값 = 공분산, SD/상관 = Pearson 상관계수(r)
+    Estimate = 분산 추정치, Std. Err. = 표준오차 (delta method), 95% CI = profile likelihood 신뢰구간
   </p>`;
   return html;
 }
@@ -1252,6 +1278,16 @@ function lrtBox(label, lrt) {
   return `<div class="lrt-box" style="margin-top:14px">
     <strong>${label} 우도비 검정 (LRT)</strong><br>
     χ²(${lrt.df}) = ${fmt(lrt.chi2)}, p = ${fmt(lrt.p)} &nbsp;→&nbsp; ${sig}
+  </div>`;
+}
+
+function lrtVsLmBox(lrt) {
+  if (!lrt) return '';
+  const pStr = lrt.p < 0.0001 ? '< 0.0001' : fmt(lrt.p);
+  const sig = lrt.p < .05 ? '✅ 무선효과 유의 → 다층모형 필요' : '❌ 무선효과 유의하지 않음';
+  return `<div class="lrt-box" style="margin-top:14px; background:#eef6ff; border-left:4px solid var(--accent)">
+    <strong>LR test vs. linear model</strong><br>
+    χ²(${lrt.df}) = ${fmt(lrt.chi2)}, &nbsp; Prob > χ² = ${pStr} &nbsp;→&nbsp; ${sig}
   </div>`;
 }
 
@@ -1736,6 +1772,7 @@ function renderCLTab(m, err) {
   if (m.lrt_vs_prev) {
     html += lrtBox('이전 모형 대비', m.lrt_vs_prev);
   }
+  html += lrtVsLmBox(m.lrt_vs_lm);
   html += `<div class="section-title">모형 공식</div><code style="font-size:12px;color:var(--muted)">${m.formula}</code>`;
   el.innerHTML = html;
 }
@@ -3164,12 +3201,17 @@ function formatRandomEffectsText(res) {
   if (!res || res.length === 0) return '  (무선효과 없음)\n';
   let text = '';
   res.forEach(re => {
-    const isCov = re.var2 && re.var2 !== '';
-    if (isCov) {
-      text += `  - ${re.group} | ${re.var1} & ${re.var2}: 공분산 = ${fmt(re.vcov)}, 상관 = ${fmt(re.sdcor)}\n`;
-    } else {
-      text += `  - ${re.group} | ${re.var1 || 'Intercept'}: 분산 = ${fmt(re.vcov)}, SD = ${fmt(re.sdcor)}\n`;
-    }
+    const isResid = re.group === 'Residual';
+    const isCov   = re.var2 && re.var2 !== '';
+    let label;
+    if (isResid) label = 'var(Residual)';
+    else if (isCov) {
+      const v1 = re.var1 === '(Intercept)' ? '_cons' : re.var1;
+      const v2 = re.var2 === '(Intercept)' ? '_cons' : re.var2;
+      label = `cov(${v1},${v2})`;
+    } else label = `var(${re.var1 || 'Intercept'})`;
+    let line = `  - ${label}: Estimate = ${fmt(re.estimate)}, SE = ${fmt(re.se)}, 95% CI [${fmt(re.ci_lower)}, ${fmt(re.ci_upper)}]`;
+    text += line + '\n';
   });
   return text;
 }
@@ -3195,8 +3237,10 @@ function buildAIPrompt() {
     const m = d.null_model;
     nullText = `\n기저모형 (Model 0 - Null Model):\n`;
     nullText += `  - ICC: ${m.icc ?? 'N/A'}\n`;
+    if (m.r2) nullText += `  - R² marginal: ${m.r2.marginal}, R² conditional: ${m.r2.conditional}\n`;
     nullText += `  - AIC: ${m.fit.AIC}, BIC: ${m.fit.BIC}, Deviance: ${m.fit.deviance}\n`;
     nullText += `  - 공식: ${m.formula}\n`;
+    if (m.fixed_effects) nullText += `  고정효과:\n${formatFixedEffectsText(m.fixed_effects)}`;
     nullText += `  무선효과:\n${formatRandomEffectsText(m.random_effects)}`;
   }
 

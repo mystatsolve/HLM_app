@@ -1,27 +1,210 @@
-# api.R - 다층모형분석 Plumber API
-# 패키지: plumber, lme4, lmerTest
+# ═══════════════════════════════════════════════════════════════════════════════
+# api.R - 다층모형분석 (HLM/MLM) R Plumber REST API
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 이 파일은 다층모형(Hierarchical Linear Model / Multilevel Model) 분석을 위한
+# R Plumber REST API 서버의 핵심 로직을 담고 있습니다.
+#
+# 주요 기능:
+#   1. EM 알고리즘 + REML/ML 이중 추정 (Stata mixed 방식)
+#   2. 4단계 모형 순차 적합 (M0 기저 → M1 무선절편 → M2 무선기울기 → M3 교차수준)
+#   3. Stata 스타일 무선효과 출력 (Estimate, SE, 95% CI)
+#   4. Profile likelihood 신뢰구간 및 delta method 표준오차
+#   5. 공분산 구조 선택 (Unstructured / Independent)
+#   6. LR test vs. linear model (Stata 스타일 무선효과 유의성 검정)
+#   7. 센터링 옵션 (GMC, CWC)
+#   8. 진단 플롯용 데이터 추출 (잔차, BLUP 등)
+#
+# 사용 패키지: plumber, lme4, lmerTest
+# ═══════════════════════════════════════════════════════════════════════════════
 
 library(plumber)
 library(lme4)
 
-# lmerTest: Satterthwaite 자유도로 p값 계산
+# ── lmerTest 패키지 확인 ──────────────────────────────────────────────────────
+# lmerTest는 Satterthwaite 근사 자유도로 고정효과의 p값을 계산합니다.
+# lmerTest가 없으면 t값만 제공되고 p값은 NA가 됩니다.
+# 또한 ranova() 함수로 개별 무선효과의 LRT 검정을 수행합니다.
 has_lmerTest <- requireNamespace("lmerTest", quietly = TRUE)
 if (has_lmerTest) {
   library(lmerTest)
-  message("[OK] lmerTest 로드 - p값 계산 가능")
+  message("[OK] lmerTest 로드 - Satterthwaite p값 계산 가능")
 } else {
   message("[경고] lmerTest 없음 - t값만 제공. install.R을 먼저 실행하세요.")
 }
 
-# 정적 파일 제공 (www/ 폴더)
+# ── 정적 파일 제공 ────────────────────────────────────────────────────────────
+# www/ 폴더의 index.html 등을 루트 경로(/)에서 제공합니다.
+# 브라우저에서 http://localhost:8001/ 접속 시 www/index.html이 로드됩니다.
 #* @assets ./www /
 list()
 
-# ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 #  유틸리티 함수
-# ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ICC 계산 (집단내 상관계수)
+# ── em_lmer(): EM 알고리즘 초기값 + lmer 적합 ─────────────────────────────────
+#
+# Stata의 mixed 명령어와 동일한 2단계 추정 전략:
+#   1단계 (EM algorithm, n_em회 반복):
+#     - 분산 성분(G, sigma²)의 안정적인 초기값을 추정합니다.
+#     - EM은 수렴이 느리지만 초기값에 강건하여, 어디서 시작해도 합리적인
+#       분산 성분 추정치로 수렴합니다.
+#   2단계 (Newton-Raphson / BOBYQA):
+#     - EM에서 얻은 초기값을 lmer()에 전달하여 최종 수렴합니다.
+#     - Newton-Raphson은 수렴 근처에서 빠르게 수렴(2차 수렴)합니다.
+#
+# 왜 EM 초기값이 필요한가?
+#   - lmer()의 기본 초기값이 실제 값과 멀면 수렴 실패 가능
+#   - 무선효과가 여러 개인 복잡한 모형에서 특히 효과적
+#   - Stata의 mixed 명령어가 이 방식을 사용하며, 수렴 안정성이 높음
+#
+# 인자:
+#   formula  : lmer 공식 (예: Y ~ X + (1 + X | group))
+#   data     : 데이터프레임
+#   REML     : TRUE = REML 추정(보고용), FALSE = ML 추정(모형비교용)
+#   n_em     : EM 반복 횟수 (기본 25회, Stata 기본값과 동일)
+#   control  : lmerControl 객체
+#
+# 반환: lmerMod 객체 (lmer() 결과)
+em_lmer <- function(formula, data, REML = TRUE, n_em = 25,
+                    control = lmerControl(), ...) {
+  # lFormula()로 모형 행렬(X, Z)을 미리 계산합니다.
+  # 실패하면 EM 없이 바로 lmer()을 호출합니다.
+  lmod <- tryCatch(lFormula(formula, data = data, REML = REML),
+                   error = function(e) NULL)
+  if (is.null(lmod)) {
+    return(lmer(formula, data = data, REML = REML, control = control, ...))
+  }
+
+  # ── 행렬 구성 ──
+  # y: 종속변수 벡터 (N×1)
+  # X: 고정효과 설계행렬 (N×p), 절편 + 독립변수
+  # Z: 무선효과 설계행렬 (N×(J*q)), 집단별 무선효과 할당
+  y <- as.numeric(lmod$fr[, 1])
+  X <- as.matrix(lmod$X)
+  Z <- as.matrix(t(lmod$reTrms$Zt))
+
+  grp_idx <- as.integer(lmod$reTrms$flist[[1]])  # 각 관측치의 집단 번호
+  J <- nlevels(lmod$reTrms$flist[[1]])            # 총 집단 수
+  N <- length(y)                                   # 총 관측치 수
+  p <- ncol(X)                                     # 고정효과 수 (절편 포함)
+  q <- length(lmod$reTrms$cnms[[1]])               # 집단당 무선효과 수
+
+  # ── EM 초기값 설정 ──
+  # sigma²: 잔차 분산 초기값 (종속변수 분산의 50%)
+  # G: 무선효과 공분산 행렬 초기값 (q×q 대각행렬)
+  sigma2 <- var(y) * 0.5
+  G <- diag(q) * var(y) * 0.25
+
+  for (iter in seq_len(n_em)) {
+    # ── GLS(일반화 최소제곱)로 고정효과 beta 추정 ──
+    # V_j = Z_j * G * Z_j' + sigma² * I  (j번째 집단의 분산-공분산 행렬)
+    # beta = (Σ X_j' V_j^{-1} X_j)^{-1} (Σ X_j' V_j^{-1} y_j)
+    XtVX <- matrix(0, p, p)
+    XtVY <- numeric(p)
+    for (j in seq_len(J)) {
+      idx  <- which(grp_idx == j)
+      nj   <- length(idx)
+      Xj   <- X[idx, , drop = FALSE]
+      yj   <- y[idx]
+      zcol <- ((j - 1) * q + 1):(j * q)
+      Zj   <- Z[idx, zcol, drop = FALSE]
+      Vj_inv <- solve(Zj %*% tcrossprod(G, Zj) + sigma2 * diag(nj))
+      XtVX <- XtVX + crossprod(Xj, Vj_inv %*% Xj)
+      XtVY <- XtVY + crossprod(Xj, Vj_inv %*% yj)
+    }
+    beta <- solve(XtVX, XtVY)
+
+    # ── E-step (기대) + M-step (최대화) ──
+    # E-step: 각 집단의 조건부 무선효과 기대값(u_j)과 공분산(C_j) 계산
+    # M-step: u_j와 C_j로부터 G(무선효과 공분산)와 sigma²(잔차 분산) 갱신
+    ss_G <- matrix(0, q, q)
+    ss_s <- 0
+    for (j in seq_len(J)) {
+      idx  <- which(grp_idx == j)
+      nj   <- length(idx)
+      Xj   <- X[idx, , drop = FALSE]
+      yj   <- y[idx]
+      zcol <- ((j - 1) * q + 1):(j * q)
+      Zj   <- Z[idx, zcol, drop = FALSE]
+
+      rj     <- yj - Xj %*% beta                          # 잔차 r_j = y_j - X_j*beta
+      Vj_inv <- solve(Zj %*% tcrossprod(G, Zj) + sigma2 * diag(nj))  # V_j^{-1}
+      GZt    <- tcrossprod(G, Zj)                          # G * Z_j'
+      uj     <- GZt %*% (Vj_inv %*% rj)                   # E[u_j | y] (조건부 기대값)
+      Cj     <- G - GZt %*% (Vj_inv %*% (Zj %*% G))      # Var[u_j | y] (조건부 분산)
+
+      ss_G <- ss_G + tcrossprod(uj) + Cj    # G 갱신용 충분통계량 누적
+      ej   <- rj - Zj %*% uj                # 개인별 잔차
+      ss_s <- ss_s + sum(ej^2) + sum(Zj * (Zj %*% Cj))  # sigma² 갱신용
+    }
+
+    # M-step: 분산 성분 갱신
+    G      <- ss_G / J      # 무선효과 공분산 행렬 갱신
+    sigma2 <- ss_s / N      # 잔차 분산 갱신
+
+    # 양정치 보장 (G가 양정치 행렬이어야 유효한 공분산)
+    eig <- eigen(G, symmetric = TRUE)
+    eig$values <- pmax(eig$values, 1e-10)
+    G <- eig$vectors %*% diag(eig$values, nrow = q) %*% t(eig$vectors)
+    sigma2 <- max(sigma2, 1e-10)
+  }
+
+  # ── EM 결과를 lmer의 theta 파라미터로 변환 ──
+  # lmer는 내부적으로 "relative Cholesky factor"를 사용합니다.
+  # G = L * L' (Cholesky 분해) → theta = L / sqrt(sigma²) 의 하삼각 원소
+  L <- tryCatch(t(chol(G)), error = function(e) {
+    eig <- eigen(G, symmetric = TRUE)
+    eig$values <- pmax(eig$values, 1e-10)
+    t(chol(eig$vectors %*% diag(eig$values, nrow = q) %*% t(eig$vectors)))
+  })
+  theta_vec <- (L / sqrt(sigma2))[lower.tri(L, diag = TRUE)]
+
+  # EM에서 계산한 초기값(theta_vec)을 start 인자로 전달하여 lmer() 적합
+  # 최종 수렴은 lmer()의 기본 옵티마이저(Newton-Raphson 또는 BOBYQA)가 담당
+  lmer(formula, data = data, REML = REML,
+       start = list(theta = theta_vec),
+       control = control, ...)
+}
+
+# ── calc_lrt_vs_lm(): LR test vs. linear model (Stata 스타일) ─────────────────
+#
+# 혼합모형(random effects 포함)이 단순 선형모형(OLS)보다 유의하게 적합한지를
+# 우도비 검정(Likelihood Ratio Test)으로 검정합니다.
+#
+# Stata의 "LR test vs. linear model: chi2(k) = ..., Prob > chi2 = ..." 출력과 동일합니다.
+# 이 검정이 유의하면 → "집단 간 분산이 존재하므로 다층모형이 필요하다"는 의미입니다.
+#
+# 인자:
+#   mixed_ml     : ML로 적합한 혼합모형 (REML=FALSE)
+#   formula_fixed: 고정효과만 포함한 공식 (예: Y ~ X1 + X2)
+#   data         : 데이터프레임
+#
+# 반환: list(chi2, df, p) 또는 오류 시 NULL
+calc_lrt_vs_lm <- function(mixed_ml, formula_fixed, data) {
+  tryCatch({
+    m_lm    <- lm(formula_fixed, data = data)         # 단순 OLS 적합
+    ll_lm   <- as.numeric(logLik(m_lm))               # OLS 로그우도
+    ll_mix  <- as.numeric(logLik(mixed_ml))            # 혼합모형 로그우도
+    chi2    <- -2 * (ll_lm - ll_mix)                   # LRT 통계량 = -2 × ΔLL
+    df_test <- attr(logLik(mixed_ml), "df") - attr(logLik(m_lm), "df")  # 자유도 차이
+    list(
+      chi2 = round(max(chi2, 0), 4),
+      df   = as.integer(df_test),
+      p    = signif(pchisq(max(chi2, 0), df_test, lower.tail = FALSE), 4)
+    )
+  }, error = function(e) NULL)
+}
+
+# ── calc_icc(): ICC (집단내 상관계수) 계산 ────────────────────────────────────
+#
+# ICC = τ₀₀ / (τ₀₀ + σ²)
+# τ₀₀: 집단 간 절편 분산 (between-group variance)
+# σ² : 집단 내 잔차 분산 (within-group variance)
+#
+# ICC가 높을수록 종속변수의 분산 중 집단 간 차이가 차지하는 비율이 큽니다.
+# 일반적으로 ICC > 0.05이면 다층모형 사용을 고려합니다.
 calc_icc <- function(model) {
   tryCatch({
     vc <- as.data.frame(VarCorr(model))
@@ -32,7 +215,16 @@ calc_icc <- function(model) {
   }, error = function(e) NA)
 }
 
-# R² 계산 (Nakagawa & Schielzeth, 2013)
+# ── calc_r2(): R² 계산 (Nakagawa & Schielzeth, 2013) ──────────────────────────
+#
+# R² marginal:    고정효과만으로 설명되는 분산 비율
+#                 = Var(Xβ) / (Var(Xβ) + Var(무선효과) + σ²)
+# R² conditional: 고정효과 + 무선효과로 설명되는 분산 비율
+#                 = (Var(Xβ) + Var(무선효과)) / (Var(Xβ) + Var(무선효과) + σ²)
+#
+# 참고: Nakagawa, S., & Schielzeth, H. (2013). A general and simple method for
+#       obtaining R² from generalized linear mixed-effects models.
+#       Methods in Ecology and Evolution, 4(2), 133-142.
 calc_r2 <- function(model) {
   tryCatch({
     vc    <- as.data.frame(VarCorr(model))
@@ -49,7 +241,11 @@ calc_r2 <- function(model) {
   }, error = function(e) list(marginal = NA, conditional = NA))
 }
 
-# 모형 적합도 지수
+# ── extract_fit(): 모형 적합도 지수 추출 ───────────────────────────────────────
+# AIC, BIC: 작을수록 적합도 우수 (모형 비교에 사용)
+# logLik: 로그우도 (클수록 적합도 우수)
+# deviance: -2 × logLik (작을수록 적합도 우수, LRT에 사용)
+# npar: 추정된 파라미터 수
 extract_fit <- function(model) {
   list(
     AIC      = round(AIC(model), 2),
@@ -60,9 +256,19 @@ extract_fit <- function(model) {
   )
 }
 
-# 고정효과 추출 (추정값, SE, t, p, 95% CI)
+# ── extract_fixed(): 고정효과 추출 ─────────────────────────────────────────────
+#
+# 각 고정효과(절편, 독립변수)에 대해 다음을 추출합니다:
+#   - estimate: 추정값 (γ 계수)
+#   - se: 표준오차
+#   - t: t통계량
+#   - p: p값 (lmerTest의 Satterthwaite 자유도 기반)
+#   - ci_lower, ci_upper: Wald 95% 신뢰구간
+#
+# 참고: summary()$coefficients 대신 coef(summary())를 사용합니다.
+#       lmerTest가 로드되면 lmer 모형은 S4 클래스(lmerModLmerTest)가 되는데,
+#       S4 객체에 $를 사용하면 오류가 발생하기 때문입니다.
 extract_fixed <- function(model) {
-  # coef(summary()) → S3/S4 모두 안전 (summary()$coefficients 는 S4에서 $ 오류 발생)
   cm  <- as.data.frame(coef(summary(model)))
   cm$term <- rownames(cm)
   rownames(cm) <- NULL
@@ -94,21 +300,229 @@ extract_fixed <- function(model) {
   })
 }
 
-# 무선효과 추출
-extract_random <- function(model) {
+# ── extract_random(): 무선효과 추출 (Stata 스타일) ─────────────────────────────
+#
+# Stata의 mixed 명령어 출력과 동일한 형식으로 무선효과를 추출합니다:
+#   - estimate: 분산 추정치 (variance, σ² 또는 τ²)
+#   - se: 표준오차 (delta method로 계산)
+#   - ci_lower, ci_upper: 95% 신뢰구간 (profile likelihood 기반)
+#
+# ── 분산(variance)의 SE 및 CI 계산 방법 ──
+#
+# 1) Profile Likelihood CI (SD 스케일):
+#    confint(model, method="profile")는 SD(표준편차) 스케일의 CI를 반환합니다.
+#    예: sd_(Intercept)|school → [4.5, 8.2]  (SD의 95% CI)
+#
+# 2) SD CI → 분산 CI 변환:
+#    variance = SD² 이므로
+#    ci_lower = sd_lower², ci_upper = sd_upper²
+#
+# 3) Delta method로 분산의 SE 계산:
+#    SE(σ²) ≈ 2σ × SE(σ)
+#    여기서 SE(σ) ≈ (sd_upper - sd_lower) / (2 × 1.96)
+#
+# ── 공분산(covariance)의 SE 및 CI 계산 방법 ──
+#
+# 1) confint는 상관(correlation) 스케일의 CI를 반환합니다.
+#    예: cor_(Intercept).SES|school → [-0.8, 0.3]
+#
+# 2) 상관 CI → 공분산 CI 변환:
+#    cov = cor × sd₁ × sd₂ 이므로
+#    ci_lower = cor_lower × sd₁ × sd₂
+#    ci_upper = cor_upper × sd₁ × sd₂
+#
+# 3) SE(cov) ≈ SE(cor) × sd₁ × sd₂  (delta method 근사)
+#
+# 인자:
+#   model: lmerMod 객체
+#   data:  원본 데이터프레임 (ranova 실행에 필요)
+#
+# 반환: list of list (각 무선효과 성분별)
+extract_random <- function(model, data = NULL) {
   vc <- as.data.frame(VarCorr(model))
+
+  # ── Profile likelihood 신뢰구간 계산 ──
+  # Profile 방법이 가장 정확하지만, 수렴 문제 시 Wald 방법으로 대체합니다.
+  # oldNames = FALSE: 새로운 이름 형식 사용 (예: "sd_(Intercept)|group")
+  ci_prof <- tryCatch({
+    ci <- confint(model, method = "profile", level = 0.95, oldNames = FALSE, quiet = TRUE)
+    as.data.frame(ci)
+  }, error = function(e) {
+    message("[confint profile] 오류, Wald 방법 시도: ", e$message)
+    tryCatch({
+      ci <- confint(model, method = "Wald", level = 0.95, oldNames = FALSE)
+      as.data.frame(ci)
+    }, error = function(e2) {
+      message("[confint Wald] 오류: ", e2$message)
+      NULL
+    })
+  })
+
+  # ── ranova: 개별 무선효과의 LRT 검정 ──
+  # ranova()는 각 무선효과를 하나씩 제거한 축소 모형과 비교하여
+  # 해당 무선효과가 유의한지 검정합니다.
+  #
+  # 주의: Plumber API 환경에서 ranova()는 내부적으로 update()를 호출하는데,
+  # update()가 모형 호출에 사용된 데이터 변수명(예: "df")을 찾지 못합니다.
+  # 이유: Plumber 핸들러 함수 내의 로컬 변수는 ranova의 평가 환경에서 보이지 않고,
+  # R이 "df"라는 이름으로 stats::df (F분포 함수)를 찾아서 오류 발생.
+  # 해결: 데이터를 전역 환경에 임시로 할당하고, on.exit()으로 정리합니다.
+  ranova_df <- NULL
+  if (has_lmerTest && !is.null(data)) {
+    tryCatch({
+      data_name <- deparse(getCall(model)$data)
+      assign(data_name, data, envir = .GlobalEnv)
+      on.exit(try(rm(list = data_name, envir = .GlobalEnv), silent = TRUE), add = TRUE)
+      ra <- lmerTest::ranova(model)
+      ranova_df <- as.data.frame(ra)
+      ranova_df$rowname <- rownames(ra)
+    }, error = function(e) {
+      message("[ranova] 오류: ", e$message)
+    })
+  }
+
   lapply(seq_len(nrow(vc)), function(i) {
+    is_cov   <- !is.na(vc$var2[i])
+    is_resid <- vc$grp[i] == "Residual"
+    var_name <- as.character(vc$var1[i])
+
+    # --- Stata 스타일 SE 및 CI 계산 ---
+    estimate <- vc$vcov[i]   # 분산 (Estimate)
+    sd_val   <- vc$sdcor[i]  # 표준편차
+    se_est   <- NA
+    ci_lower <- NA
+    ci_upper <- NA
+
+    if (!is.null(ci_prof)) {
+      ci_names <- rownames(ci_prof)
+      matched_ci <- NULL
+
+      if (is_resid) {
+        # 잔차: "sigma" 파라미터
+        idx <- which(ci_names == "sigma")
+        if (length(idx) > 0) matched_ci <- idx[1]
+      } else if (is_cov) {
+        # 공분산: "cor_var1.var2|grp" 형태 → 상관 스케일 CI
+        grp_name <- vc$grp[i]
+        var2_name <- as.character(vc$var2[i])
+        # confint 이름 예: "cor_(Intercept).SES|school"
+        for (k in seq_along(ci_names)) {
+          cn <- ci_names[k]
+          if (grepl("^cor_", cn) && grepl(grp_name, cn, fixed = TRUE)) {
+            # var1, var2 모두 포함되는지 확인
+            v1_match <- if (var_name == "(Intercept)") grepl("Intercept", cn, fixed = TRUE) else grepl(var_name, cn, fixed = TRUE)
+            v2_match <- if (var2_name == "(Intercept)") grepl("Intercept", cn, fixed = TRUE) else grepl(var2_name, cn, fixed = TRUE)
+            if (v1_match && v2_match) { matched_ci <- k; break }
+          }
+        }
+        if (!is.null(matched_ci)) {
+          cor_lower <- ci_prof[matched_ci, 1]
+          cor_upper <- ci_prof[matched_ci, 2]
+          # 상관 → 공분산 변환: cov = cor * sd1 * sd2
+          # VarCorr에서 sd1, sd2 찾기
+          sd1 <- NA; sd2 <- NA
+          for (r in seq_len(nrow(vc))) {
+            if (vc$grp[r] == grp_name && is.na(vc$var2[r])) {
+              if (as.character(vc$var1[r]) == var_name) sd1 <- vc$sdcor[r]
+              if (as.character(vc$var1[r]) == var2_name) sd2 <- vc$sdcor[r]
+            }
+          }
+          if (!is.na(sd1) && !is.na(sd2)) {
+            ci_lower <- cor_lower * sd1 * sd2
+            ci_upper <- cor_upper * sd1 * sd2
+            # SE(cov) ≈ SE(cor) * sd1 * sd2 (delta method 근사)
+            se_cor <- (cor_upper - cor_lower) / (2 * 1.96)
+            se_est <- se_cor * sd1 * sd2
+          }
+          matched_ci <- NULL  # 아래 분산 변환 블록 건너뛰기
+        }
+      } else {
+        # 분산: "sd_(Intercept)|grp" 또는 "sd_varname|grp" 형태
+        grp_name <- vc$grp[i]
+        if (var_name == "(Intercept)") {
+          pattern <- paste0("sd_(Intercept)|", grp_name)
+        } else {
+          pattern <- paste0("sd_", var_name, "|", grp_name)
+        }
+        idx <- which(ci_names == pattern)
+        if (length(idx) > 0) matched_ci <- idx[1]
+
+        # 매칭 안 되면 부분 매칭 시도
+        if (is.null(matched_ci)) {
+          for (k in seq_along(ci_names)) {
+            cn <- ci_names[k]
+            if (grepl("^sd_", cn) && grepl(grp_name, cn, fixed = TRUE)) {
+              if (var_name == "(Intercept)" && grepl("Intercept", cn, fixed = TRUE)) {
+                matched_ci <- k; break
+              } else if (var_name != "(Intercept)" && grepl(var_name, cn, fixed = TRUE)) {
+                matched_ci <- k; break
+              }
+            }
+          }
+        }
+      }
+
+      # 분산/잔차: SD CI → 분산 CI 변환
+      if (!is.null(matched_ci)) {
+        sd_lower <- max(ci_prof[matched_ci, 1], 0)
+        sd_upper <- ci_prof[matched_ci, 2]
+        ci_lower <- sd_lower^2
+        ci_upper <- sd_upper^2
+        se_sd <- (sd_upper - sd_lower) / (2 * 1.96)
+        se_est <- 2 * sd_val * se_sd
+      }
+    }
+
+    # --- ranova LRT ---
+    lrt_df <- NA; lrt_chisq <- NA; lrt_p <- NA
+
+    if (!is.null(ranova_df) && !is_cov && !is_resid) {
+      for (j in seq_len(nrow(ranova_df))) {
+        rn <- ranova_df$rowname[j]
+        if (rn == "<none>") next
+        matched <- FALSE
+        if (var_name == "(Intercept)") {
+          if (grepl("(1 | ", rn, fixed = TRUE) && !grepl(" in ", rn, fixed = TRUE)) matched <- TRUE
+        } else {
+          if (grepl(var_name, rn, fixed = TRUE)) matched <- TRUE
+        }
+        if (matched) {
+          lrt_chisq <- ranova_df[j, "LRT"]
+          lrt_df    <- ranova_df[j, "Df"]
+          lrt_p     <- ranova_df[j, "Pr(>Chisq)"]
+          break
+        }
+      }
+    }
+
     list(
-      group = vc$grp[i],
-      var1  = ifelse(is.na(vc$var1[i]), "", as.character(vc$var1[i])),
-      var2  = ifelse(is.na(vc$var2[i]), "", as.character(vc$var2[i])),
-      vcov  = round(vc$vcov[i], 4),
-      sdcor = round(vc$sdcor[i], 4)
+      group     = vc$grp[i],
+      var1      = ifelse(is.na(vc$var1[i]), "", var_name),
+      var2      = ifelse(is.na(vc$var2[i]), "", as.character(vc$var2[i])),
+      estimate  = round(estimate, 4),
+      se        = if (!is.na(se_est)) round(se_est, 4) else NA,
+      ci_lower  = if (!is.na(ci_lower)) round(ci_lower, 4) else NA,
+      ci_upper  = if (!is.na(ci_upper)) round(ci_upper, 4) else NA,
+      vcov      = round(vc$vcov[i], 4),
+      sdcor     = round(vc$sdcor[i], 4),
+      lrt_df    = if (!is.na(lrt_df)) as.integer(lrt_df) else NA,
+      lrt_chisq = if (!is.na(lrt_chisq)) round(lrt_chisq, 4) else NA,
+      lrt_p     = if (!is.na(lrt_p)) signif(lrt_p, 4) else NA
     )
   })
 }
 
-# 모형 진단 데이터 추출
+# ── extract_diagnostics(): 모형 진단 데이터 추출 ──────────────────────────────
+#
+# 프론트엔드의 진단 플롯 (잔차 히스토그램, Q-Q plot, 잔차 vs 예측값 등)에
+# 필요한 데이터를 추출합니다.
+#
+# 추출 항목:
+#   - predicted: 모형 예측값
+#   - residuals: 잔차 (관측값 - 예측값)
+#   - zresid: 표준화 잔차 ((잔차 - 평균) / SD)
+#   - re_data: 무선효과 BLUP (Best Linear Unbiased Prediction)
+#   - predictor_values: 독립변수 값 (잔차 vs 독립변수 플롯용)
 extract_diagnostics <- function(model, df, outcome, group_var, l1_preds, l2_covs, model_name) {
   tryCatch({
     predicted <- as.numeric(predict(model))
@@ -161,10 +575,14 @@ extract_diagnostics <- function(model, df, outcome, group_var, l1_preds, l2_covs
   })
 }
 
-# ─────────────────────────────────────────
-#  Plumber 엔드포인트
-# ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Plumber 엔드포인트 (REST API)
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ── CORS 필터 ─────────────────────────────────────────────────────────────────
+# 프론트엔드(브라우저)에서 API를 호출할 수 있도록 CORS 헤더를 설정합니다.
+# 모든 출처(*)에서의 요청을 허용합니다.
+# 프로덕션 환경에서는 특정 도메인만 허용하도록 수정하세요.
 #* CORS 필터
 #* @filter cors
 function(req, res) {
@@ -175,6 +593,8 @@ function(req, res) {
   plumber::forward()
 }
 
+# ── /api/health: 서버 상태 확인 엔드포인트 ─────────────────────────────────────
+# R 버전, lme4 버전, lmerTest 설치 여부를 반환합니다.
 #* API 상태 확인
 #* @get /api/health
 #* @serializer unboxedJSON
@@ -187,6 +607,27 @@ function() {
   )
 }
 
+# ── /api/analyze: 다층모형 분석 실행 (핵심 엔드포인트) ─────────────────────────
+#
+# 프론트엔드에서 CSV 데이터와 분석 설정을 JSON으로 전송하면,
+# 이 엔드포인트에서 4단계 모형(M0~M3)을 순차적으로 적합하고 결과를 반환합니다.
+#
+# 요청 본문 (JSON):
+#   data: { col1: [1,2,3], col2: [4,5,6] }  - 컬럼 형식 데이터
+#   outcome: "종속변수명"
+#   group_var: "집단변수명"
+#   l1_preds: ["L1독립변수1", ...]
+#   l2_covs: ["L2공변량1", ...]
+#   rand_slopes: ["무선기울기변수1", ...]
+#   cross_interactions: [{ l1: "변수1", l2: "변수2" }, ...]
+#   l1_centering: "none" | "gmc" | "cwc"
+#   l2_centering: "none" | "gmc"
+#   cov_struct: "un" (비구조적) | "ind" (독립)
+#
+# 추정 방식:
+#   - REML (보고용): 분산 성분의 비편향 추정치를 제공 (HLM7, SPSS, Stata 기본값)
+#   - ML (모형비교용): 중첩 모형 간 LRT 비교에 사용 (REML은 고정효과가 다른 모형 비교 불가)
+#   - 각 모형마다 REML + ML 두 번 적합합니다.
 #* 다층모형 분석 실행
 #* @post /api/analyze
 #* @parser json
@@ -206,6 +647,9 @@ function(req) {
     rand_slopes <- if (!is.null(body$rand_slopes)) as.character(unlist(body$rand_slopes)) else character(0)
     l1_centering <- if (!is.null(body$l1_centering)) as.character(body$l1_centering) else "none"
     l2_centering <- if (!is.null(body$l2_centering)) as.character(body$l2_centering) else "none"
+    # 공분산 구조: "un" = Unstructured (분산+공분산 모두 추정, lme4: | )
+    #              "ind" = Independent (분산만 추정, 공분산=0, lme4: || )
+    cov_struct   <- if (!is.null(body$cov_struct)) as.character(body$cov_struct) else "un"
     cross_interactions <- if (!is.null(body$cross_interactions)) body$cross_interactions else list()
     # jsonlite가 [{l1:"a",l2:"b"},...] 를 data.frame으로 변환하므로 list-of-list로 정규화
     if (is.data.frame(cross_interactions)) {
@@ -238,6 +682,18 @@ function(req) {
     if (n_groups <   3) stop("집단 수가 너무 적습니다 (최소 3개 이상 필요).")
 
     # ── 6. 센터링 (Centering) ──────────────────────────────────────
+    # 센터링은 다층모형에서 계수의 해석을 용이하게 합니다.
+    #
+    # GMC (Grand Mean Centering): X_gmc = X - mean(X)
+    #   - 절편(γ₀₀)이 "전체 평균에서의 종속변수 기대값"을 의미
+    #   - L1, L2 변수 모두 적용 가능
+    #
+    # CWC (Centering Within Context = Group Mean Centering):
+    #   - X_cwc = X - mean_j(X)  (각 관측치에서 해당 집단 평균을 뺌)
+    #   - 순수한 개인 내 효과(within-group effect)를 분리
+    #   - 집단평균 변수(X_gm)를 자동으로 L2 공변량에 추가하여
+    #     집단 간 효과(between-group effect)도 함께 추정
+    #
     cwc_gm_vars <- character(0)   # CWC 시 자동 추가되는 집단평균 변수명
 
     if (l1_centering == "gmc" && length(l1_preds) > 0) {
@@ -247,12 +703,12 @@ function(req) {
     } else if (l1_centering == "cwc" && length(l1_preds) > 0) {
       for (v in l1_preds) {
         gm <- ave(df[[v]], df[[group_var]], FUN = function(x) mean(x, na.rm = TRUE))
-        df[[v]] <- df[[v]] - gm                          # 집단평균 중심화
+        df[[v]] <- df[[v]] - gm                          # 집단평균 중심화 (within 효과)
         gm_name <- paste0(v, "_gm")
-        df[[gm_name]] <- gm - mean(df[[v]] + gm, na.rm = TRUE)  # 집단평균의 전체평균 중심화
+        df[[gm_name]] <- gm - mean(df[[v]] + gm, na.rm = TRUE)  # 집단평균의 GMC (between 효과)
         cwc_gm_vars <- c(cwc_gm_vars, gm_name)
       }
-      # CWC 집단평균 변수를 L2 공변량에 자동 추가
+      # CWC 시 집단평균 변수를 L2 공변량에 자동 추가 → between/within 효과 분리
       l2_covs <- unique(c(l2_covs, cwc_gm_vars))
     }
 
@@ -273,6 +729,7 @@ function(req) {
         group_var = group_var,
         l1_centering = l1_centering,
         l2_centering = l2_centering,
+        cov_struct   = cov_struct,
         cwc_gm_vars  = as.list(cwc_gm_vars)
       )
     )
@@ -337,14 +794,22 @@ function(req) {
       rcode <- c(rcode, "")
     }
 
-    # ── Model 0: 기저모형 (Null) ──────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # Model 0: 기저모형 (Null Model / Empty Model)
+    # ══════════════════════════════════════════════════════════════
+    # 고정효과: 절편만 포함 (Y ~ 1)
+    # 무선효과: 절편의 집단 간 변동만 허용 ((1|group))
+    # 용도: ICC 계산 → 종속변수 분산 중 집단 간 차이 비율 확인
+    #       ICC가 높으면 다층모형이 필요하다는 근거
     f0 <- as.formula(paste0(outcome, " ~ 1 + (1|", group_var, ")"))
-    m0 <- suppressWarnings(lmer(f0, data = df, REML = FALSE))
+    f0_fixed <- as.formula(paste0(outcome, " ~ 1"))
+    m0    <- suppressWarnings(em_lmer(f0, data = df, REML = TRUE))   # REML: 보고용 (비편향 분산)
+    m0_ml <- suppressWarnings(em_lmer(f0, data = df, REML = FALSE))  # ML: 모형비교용 (LRT)
 
     rcode <- c(rcode,
       "# ── 4. Model 0: 기저모형 (Null Model) ──",
-      "# 고정효과 없이 무선절편만 포함하여 ICC 계산",
-      paste0('m0 <- lmer(', deparse(f0), ', data = df, REML = FALSE)'),
+      "# EM 알고리즘 초기값 + REML 추정 (Stata mixed 방식)",
+      paste0('m0 <- lmer(', deparse(f0), ', data = df, REML = TRUE)'),
       "summary(m0)",
       paste0("# ICC = ", round(calc_icc(m0), 4), " → 종속변수 분산의 ", round(calc_icc(m0) * 100, 1), "%가 집단 간 차이"),
       ""
@@ -353,80 +818,103 @@ function(req) {
     result$null_model <- list(
       formula        = deparse(f0),
       icc            = calc_icc(m0),
-      random_effects = extract_random(m0),
-      fit            = extract_fit(m0)
+      fixed_effects  = extract_fixed(m0),
+      random_effects = extract_random(m0, df),
+      r2             = calc_r2(m0),
+      fit            = extract_fit(m0_ml),
+      lrt_vs_lm      = calc_lrt_vs_lm(m0_ml, f0_fixed, df)
     )
 
-    # ── Model 1: 무선절편 모형 (Random Intercept) ─────────────────
+    # ══════════════════════════════════════════════════════════════
+    # Model 1: 무선절편 모형 (Random Intercept Model)
+    # ══════════════════════════════════════════════════════════════
+    # 고정효과: 절편 + L1 독립변수 + L2 공변량
+    # 무선효과: 절편만 집단 간 변동 허용 (기울기는 고정)
+    # 의미: 독립변수의 효과(기울기)는 모든 집단에서 동일하지만,
+    #       종속변수의 평균(절편)은 집단마다 다를 수 있음
     all_fixed <- c(l1_preds, l2_covs)
     if (length(all_fixed) > 0) {
       f1_str <- paste0(outcome, " ~ ",
                        paste(all_fixed, collapse = " + "),
                        " + (1|", group_var, ")")
-      m1 <- suppressWarnings(lmer(as.formula(f1_str), data = df, REML = FALSE))
-      lrt01 <- suppressWarnings(anova(m0, m1))
+      f1_fixed <- as.formula(paste0(outcome, " ~ ", paste(all_fixed, collapse = " + ")))
+      m1    <- suppressWarnings(em_lmer(as.formula(f1_str), data = df, REML = TRUE))
+      m1_ml <- suppressWarnings(em_lmer(as.formula(f1_str), data = df, REML = FALSE))
+      lrt01 <- suppressWarnings(anova(m0_ml, m1_ml))
 
       result$ri_model <- list(
         formula        = f1_str,
         fixed_effects  = extract_fixed(m1),
-        random_effects = extract_random(m1),
+        random_effects = extract_random(m1, df),
         icc            = calc_icc(m1),
         r2             = calc_r2(m1),
-        fit            = extract_fit(m1),
+        fit            = extract_fit(m1_ml),
         lrt_vs_null    = list(
           chi2 = round(lrt01[["Chisq"]][2], 4),
           df   = lrt01[["Df"]][2],
           p    = round(lrt01[["Pr(>Chisq)"]][2], 4)
-        )
+        ),
+        lrt_vs_lm      = calc_lrt_vs_lm(m1_ml, f1_fixed, df)
       )
 
       rcode <- c(rcode,
         "# ── 5. Model 1: 무선절편 모형 (Random Intercept) ──",
-        "# Level-1, Level-2 독립변수를 고정효과로 투입하고 무선절편만 포함",
-        "# 집단 간 절편(평균) 차이는 허용하되, 기울기는 모든 집단에서 동일하다고 가정",
-        paste0('m1 <- lmer(', f1_str, ', data = df, REML = FALSE)'),
+        "# EM 알고리즘 초기값 + REML 추정 (Stata mixed 방식)",
+        paste0('m1 <- lmer(', f1_str, ', data = df, REML = TRUE)'),
         "summary(m1)  # 고정효과 계수, 무선효과 분산 확인",
         "",
-        "# Model 0 vs Model 1: 우도비 검정 (Likelihood Ratio Test)",
-        "anova(m0, m1)  # 독립변수 투입 효과가 유의한지 검정",
+        "# Model 0 vs Model 1: 우도비 검정 (ML 기반)",
+        "anova(m0_ml, m1_ml)  # 독립변수 투입 효과가 유의한지 검정",
         ""
       )
 
-      # ── Model 2: 무선기울기 모형 (Random Slope) ─────────────────
+      # ══════════════════════════════════════════════════════════════
+      # Model 2: 무선기울기 모형 (Random Slope Model)
+      # ══════════════════════════════════════════════════════════════
+      # 고정효과: M1과 동일
+      # 무선효과: 절편 + 선택된 L1 변수의 기울기도 집단 간 변동 허용
+      # 의미: 독립변수의 효과(기울기)가 집단마다 다를 수 있음
+      #
+      # 공분산 구조:
+      #   un (Unstructured): (1 + X | group) → 절편-기울기 공분산도 추정
+      #   ind (Independent):  (1 + X || group) → 공분산 = 0으로 제약
       valid_rs <- intersect(rand_slopes, l1_preds)
       if (length(valid_rs) > 0) {
         slope_part <- paste(c("1", valid_rs), collapse = " + ")
+        re_bar <- if (cov_struct == "ind") "||" else "|"
         f2_str <- paste0(outcome, " ~ ",
                          paste(all_fixed, collapse = " + "),
-                         " + (", slope_part, "|", group_var, ")")
+                         " + (", slope_part, re_bar, group_var, ")")
 
         # 에러 시 문자열 반환 → is.character()로 판별 (S4 모형에 $ 사용 금지)
+        em_ctrl <- lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
         m2 <- tryCatch(
-          suppressWarnings(
-            lmer(as.formula(f2_str), data = df, REML = FALSE,
-                 control = lmerControl(optimizer = "bobyqa",
-                                       optCtrl   = list(maxfun = 2e5)))
-          ),
+          suppressWarnings(em_lmer(as.formula(f2_str), data = df, REML = TRUE, control = em_ctrl)),
           error = function(e) e$message
         )
 
         if (is.character(m2)) {
           result$rs_model_error <- paste0("수렴 실패: ", m2)
         } else {
-          lrt12 <- tryCatch(suppressWarnings(anova(m1, m2)), error = function(e) NULL)
+          m2_ml <- tryCatch(
+            suppressWarnings(em_lmer(as.formula(f2_str), data = df, REML = FALSE, control = em_ctrl)),
+            error = function(e) e$message
+          )
+          lrt12 <- if (!is.character(m2_ml)) tryCatch(suppressWarnings(anova(m1_ml, m2_ml)), error = function(e) NULL) else NULL
 
           result$rs_model <- list(
             formula        = f2_str,
             fixed_effects  = extract_fixed(m2),
-            random_effects = extract_random(m2),
+            random_effects = extract_random(m2, df),
             icc            = calc_icc(m2),
             r2             = calc_r2(m2),
-            fit            = extract_fit(m2),
+            fit            = if (!is.character(m2_ml)) extract_fit(m2_ml) else extract_fit(m2),
             lrt_vs_ri      = if (!is.null(lrt12)) list(
               chi2 = round(lrt12[["Chisq"]][2], 4),
               df   = lrt12[["Df"]][2],
               p    = round(lrt12[["Pr(>Chisq)"]][2], 4)
-            ) else NULL
+            ) else NULL,
+            lrt_vs_lm      = if (!is.character(m2_ml)) calc_lrt_vs_lm(m2_ml, f1_fixed, df) else NULL
           )
 
           rcode <- c(rcode,
@@ -434,18 +922,24 @@ function(req) {
             "# 무선절편에 무선기울기를 추가하여 집단별 기울기 차이를 허용",
             "# 즉, 독립변수의 효과가 집단마다 다를 수 있는지 검정",
             paste0('m2 <- lmer(', f2_str, ','),
-            "             data = df, REML = FALSE,",
+            "             data = df, REML = TRUE,",
             "             control = lmerControl(optimizer = 'bobyqa', optCtrl = list(maxfun = 2e5)))",
             "summary(m2)  # 고정효과 + 무선기울기 분산 확인",
             "",
-            "# Model 1 vs Model 2: 우도비 검정",
-            "anova(m1, m2)  # 무선기울기 추가가 유의한지 검정",
+            "# Model 1 vs Model 2: 우도비 검정 (ML 기반)",
+            "anova(m1_ml, m2_ml)  # 무선기울기 추가가 유의한지 검정",
             ""
           )
         }
       }
 
-      # ── Model 3: 교차수준 상호작용 모형 (Cross-Level Interaction) ──
+      # ══════════════════════════════════════════════════════════════
+      # Model 3: 교차수준 상호작용 모형 (Cross-Level Interaction)
+      # ══════════════════════════════════════════════════════════════
+      # 고정효과: M1 + L1×L2 상호작용항
+      # 무선효과: M2와 동일 (상호작용에 포함된 L1 변수 자동 추가)
+      # 의미: L2 변수(집단 특성)가 L1 변수의 기울기에 미치는 영향 검정
+      #       예: 학교 크기(L2)가 SES→성취도 기울기(L1)에 영향을 주는가?
       if (length(cross_interactions) > 0) {
         int_terms   <- character(0)
         int_l1_vars <- character(0)
@@ -463,38 +957,42 @@ function(req) {
           all_rs_m3   <- unique(c(valid_rs, int_l1_vars))
           fixed_part  <- paste(c(all_fixed, int_terms), collapse = " + ")
           slope_part3 <- paste(c("1", all_rs_m3), collapse = " + ")
+          re_bar3 <- if (cov_struct == "ind") "||" else "|"
           f3_str <- paste0(outcome, " ~ ", fixed_part,
-                           " + (", slope_part3, "|", group_var, ")")
+                           " + (", slope_part3, re_bar3, group_var, ")")
 
+          em_ctrl3 <- lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
           m3 <- tryCatch(
-            suppressWarnings(
-              lmer(as.formula(f3_str), data = df, REML = FALSE,
-                   control = lmerControl(optimizer = "bobyqa",
-                                         optCtrl   = list(maxfun = 2e5)))
-            ),
+            suppressWarnings(em_lmer(as.formula(f3_str), data = df, REML = TRUE, control = em_ctrl3)),
             error = function(e) e$message
           )
 
           if (is.character(m3)) {
             result$cl_model_error <- paste0("수렴 실패: ", m3)
           } else {
-            prev_m <- m1
-            if (length(valid_rs) > 0 && exists("m2") && !is.character(m2)) prev_m <- m2
-            lrt_m3 <- tryCatch(suppressWarnings(anova(prev_m, m3)), error = function(e) NULL)
+            m3_ml <- tryCatch(
+              suppressWarnings(em_lmer(as.formula(f3_str), data = df, REML = FALSE, control = em_ctrl3)),
+              error = function(e) e$message
+            )
+            prev_m_ml <- m1_ml
+            if (length(valid_rs) > 0 && exists("m2_ml") && !is.character(m2_ml)) prev_m_ml <- m2_ml
+            lrt_m3 <- if (!is.character(m3_ml)) tryCatch(suppressWarnings(anova(prev_m_ml, m3_ml)), error = function(e) NULL) else NULL
+            f3_fixed <- as.formula(paste0(outcome, " ~ ", fixed_part))
 
             result$cl_model <- list(
               formula           = f3_str,
               fixed_effects     = extract_fixed(m3),
-              random_effects    = extract_random(m3),
+              random_effects    = extract_random(m3, df),
               icc               = calc_icc(m3),
               r2                = calc_r2(m3),
-              fit               = extract_fit(m3),
+              fit               = if (!is.character(m3_ml)) extract_fit(m3_ml) else extract_fit(m3),
               interaction_terms = as.list(int_terms),
               lrt_vs_prev       = if (!is.null(lrt_m3)) list(
                 chi2 = round(lrt_m3[["Chisq"]][2], 4),
                 df   = lrt_m3[["Df"]][2],
                 p    = round(lrt_m3[["Pr(>Chisq)"]][2], 4)
-              ) else NULL
+              ) else NULL,
+              lrt_vs_lm         = if (!is.character(m3_ml)) calc_lrt_vs_lm(m3_ml, f3_fixed, df) else NULL
             )
 
             rcode <- c(rcode,
@@ -502,12 +1000,12 @@ function(req) {
               "# Level-1 변수와 Level-2 변수의 교차수준 상호작용 효과 검정",
               "# 집단 수준 변수가 개인 수준 변수의 기울기에 미치는 영향 분석",
               paste0('m3 <- lmer(', f3_str, ','),
-              "             data = df, REML = FALSE,",
+              "             data = df, REML = TRUE,",
               "             control = lmerControl(optimizer = 'bobyqa', optCtrl = list(maxfun = 2e5)))",
               "summary(m3)  # 교차수준 상호작용 계수 확인",
               "",
-              "# 이전 모형 vs Model 3: 우도비 검정",
-              paste0("anova(", if (length(valid_rs) > 0 && !is.null(result$rs_model)) "m2" else "m1", ", m3)  # 교차수준 상호작용 효과 검정"),
+              "# 이전 모형 vs Model 3: 우도비 검정 (ML 기반)",
+              paste0("anova(", if (length(valid_rs) > 0 && !is.null(result$rs_model)) "m2_ml" else "m1_ml", ", m3_ml)  # 교차수준 상호작용 효과 검정"),
               ""
             )
           }
@@ -598,19 +1096,20 @@ function(req) {
     rcode <- c(rcode,
       "# ── 모형 비교 (Model Comparison) ──",
       "# 중첩 모형 간 우도비 검정(LRT)으로 최적 모형 선택",
+      "# LRT는 ML(REML=FALSE) 기반으로 수행해야 정확",
       "# AIC/BIC가 작을수록, LRT p값이 유의할수록 해당 모형이 우수"
     )
     if (!is.null(result$ri_model)) {
-      rcode <- c(rcode, "anova(m0, m1)  # 기저모형 vs 무선절편")
+      rcode <- c(rcode, "anova(m0_ml, m1_ml)  # 기저모형 vs 무선절편 (ML 기반)")
     }
     if (!is.null(result$rs_model)) {
-      rcode <- c(rcode, "anova(m1, m2)  # 무선절편 vs 무선기울기")
+      rcode <- c(rcode, "anova(m1_ml, m2_ml)  # 무선절편 vs 무선기울기 (ML 기반)")
     }
     if (!is.null(result$cl_model)) {
       if (!is.null(result$rs_model)) {
-        rcode <- c(rcode, "anova(m2, m3)  # 무선기울기 vs 교차수준")
+        rcode <- c(rcode, "anova(m2_ml, m3_ml)  # 무선기울기 vs 교차수준 (ML 기반)")
       } else {
-        rcode <- c(rcode, "anova(m1, m3)  # 무선절편 vs 교차수준")
+        rcode <- c(rcode, "anova(m1_ml, m3_ml)  # 무선절편 vs 교차수준 (ML 기반)")
       }
     }
     rcode <- c(rcode, "")
