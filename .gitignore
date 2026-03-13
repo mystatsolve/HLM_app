@@ -1,0 +1,20 @@
+# R
+.Rhistory
+.Rdata
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Temp
+*.log
+*.tmp

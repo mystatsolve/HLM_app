@@ -6,6 +6,8 @@
 <title>다층모형분석 (MLM) 웹앱</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 <style>
 /* ─── 기본 설정 ─── */
 :root {
@@ -203,6 +205,139 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
 
 /* ─── 교차수준 상호작용 ─── */
 .interaction-term { background: #fef3c7; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+
+/* ─── AI 보고서 ─── */
+.ai-provider-group { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.ai-provider-btn {
+  flex: 1; min-width: 140px; padding: 10px 14px; border: 2px solid var(--border);
+  border-radius: 8px; background: #fafbfc; cursor: pointer; text-align: center;
+  transition: border-color .2s, background .2s; font-size: 13px; font-weight: 600;
+}
+.ai-provider-btn:hover { border-color: var(--accent); background: var(--accent-lt); }
+.ai-provider-btn.selected { border-color: var(--accent); background: var(--accent-lt); }
+.ai-provider-btn .provider-icon { font-size: 22px; display: block; margin-bottom: 4px; }
+.ai-provider-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+}
+.badge-openai { background: #10a37f20; color: #10a37f; }
+.badge-claude { background: #d97b0020; color: #d97b00; }
+.badge-local  { background: #6366f120; color: #6366f1; }
+
+.report-preview {
+  border: 1px solid var(--border); border-radius: 8px; padding: 24px;
+  background: #fff; max-height: 600px; overflow-y: auto;
+  font-size: 14px; line-height: 1.8;
+}
+.report-preview h1 { font-size: 20px; font-weight: 700; color: var(--primary); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-lt); }
+.report-preview h2 { font-size: 17px; font-weight: 700; color: var(--primary); margin: 18px 0 8px; }
+.report-preview h3 { font-size: 15px; font-weight: 600; color: var(--text); margin: 14px 0 6px; }
+.report-preview p { margin: 8px 0; }
+.report-preview ul, .report-preview ol { margin: 8px 0 8px 20px; }
+.report-preview li { margin: 4px 0; }
+.report-preview strong { font-weight: 700; }
+.report-preview em { font-style: italic; }
+.report-preview code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+.report-preview blockquote { border-left: 3px solid var(--accent); padding: 8px 14px; margin: 10px 0; background: #f8fafc; color: var(--muted); }
+.report-preview table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+.report-preview th, .report-preview td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.report-preview th { background: var(--primary); color: #fff; }
+
+.report-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.btn-outline {
+  padding: 8px 18px; border: 1.5px solid var(--accent); border-radius: 6px;
+  background: #fff; color: var(--accent); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .2s, color .2s;
+}
+.btn-outline:hover { background: var(--accent); color: #fff; }
+.btn-outline:disabled { opacity: .45; cursor: not-allowed; }
+
+#report-loading { display: none; text-align: center; padding: 24px; }
+#report-loading .spinner { width: 28px; height: 28px; border-width: 3px; }
+
+/* ─── 진단 플롯 ─── */
+.diag-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
+.diag-controls > div { min-width: 180px; }
+.diag-chart-wrap { position: relative; height: 420px; }
+
+/* ─── 모형 공식 ─── */
+.formula-model-select { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.formula-model-btn {
+  padding: 9px 20px; border: 2px solid var(--border); border-radius: 8px;
+  background: #fafbfc; cursor: pointer; font-size: 13px; font-weight: 600;
+  transition: all .2s; color: var(--text);
+}
+.formula-model-btn:hover { border-color: var(--accent); background: var(--accent-lt); }
+.formula-model-btn.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+.formula-card { margin-bottom: 20px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.formula-card-header {
+  background: linear-gradient(135deg, var(--primary), #2d5a8e);
+  color: #fff; padding: 12px 20px; font-weight: 700; font-size: 14px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.formula-card-body { padding: 20px; }
+
+.formula-section { margin-bottom: 16px; }
+.formula-section-title {
+  font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .8px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+}
+
+.formula-level {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 5px 10px; border-radius: 6px; margin-bottom: 4px;
+}
+.formula-level:hover { background: #f8fafc; }
+.formula-label {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  min-width: 70px; flex-shrink: 0;
+}
+.formula-eq {
+  font-family: 'Cambria Math', 'Times New Roman', 'STIX Two Math', Georgia, serif;
+  font-size: 1.08em; line-height: 1.7; color: var(--text);
+}
+.formula-eq .fm-g { color: #1d4ed8; font-weight: 600; }
+.formula-eq .fm-r { color: #dc2626; font-style: italic; }
+.formula-eq .fm-v { font-style: italic; }
+.formula-eq .fm-op { color: #94a3b8; margin: 0 3px; }
+.formula-eq sub { font-size: .68em; }
+
+.formula-combined-box {
+  margin-top: 8px; padding: 12px 16px; background: #f0f9ff;
+  border: 1px solid #bae6fd; border-radius: 8px;
+}
+.formula-r-box {
+  margin-top: 12px; padding: 12px 16px;
+  background: #1e293b; color: #e2e8f0; border-radius: 8px;
+  font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+  font-size: 13px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap;
+}
+.formula-r-box .rf { color: #93c5fd; }
+.formula-r-box .rs { color: #86efac; }
+
+/* ─── 상관행렬 변수 선택 ─── */
+.corr-var-select { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; padding: 10px 12px; background: #fafbfc; border: 1px solid var(--border); border-radius: 6px; }
+.corr-var-select label { font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.corr-var-select input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; }
+.corr-var-select .corr-lbl { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-right: 6px; }
+.corr-var-select .corr-sep { color: var(--border); margin: 0 4px; }
+
+/* ─── Pairs Plot ─── */
+.pairs-grid { display: grid; gap: 3px; width: 100%; }
+.pairs-cell { position: relative; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; background: #fff; }
+.pairs-cell canvas { display: block; width: 100% !important; height: 100% !important; }
+.pairs-corr {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 4px; background: #fafbfc;
+}
+.pairs-corr .corr-val { line-height: 1.2; }
+.pairs-diag-label {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--primary);
+  position: absolute; top: 2px; left: 0; right: 0; text-align: center;
+  pointer-events: none; z-index: 2;
+}
 </style>
 </head>
 <body>
@@ -265,6 +400,7 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
     </div>
 
     <div class="desc-pane" id="dtab-corr">
+      <div id="corr-var-selector"></div>
       <div class="tbl-wrap" id="corr-matrix-tbl"></div>
     </div>
 
@@ -295,6 +431,7 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
         <select class="ctrl" id="sel-viz-type" onchange="onVizTypeChange()" style="max-width:200px">
           <option value="scatter">산점도 (Scatter Plot)</option>
           <option value="box">박스플롯 (Box Plot)</option>
+          <option value="spaghetti">개인 궤적 (Spaghetti Plot)</option>
         </select>
       </div>
       <div id="viz-scatter-opts" class="form-row triple">
@@ -319,6 +456,20 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
         <div>
           <label class="field-label">수치변수</label>
           <select class="ctrl" id="sel-viz-bval" onchange="renderViz()"><option value="">-- 선택 --</option></select>
+        </div>
+      </div>
+      <div id="viz-spaghetti-opts" class="form-row triple" style="display:none">
+        <div>
+          <label class="field-label">X 변수 (시간/연속)</label>
+          <select class="ctrl" id="sel-viz-sx" onchange="renderViz()"><option value="">-- 선택 --</option></select>
+        </div>
+        <div>
+          <label class="field-label">Y 변수 (종속)</label>
+          <select class="ctrl" id="sel-viz-sy" onchange="renderViz()"><option value="">-- 선택 --</option></select>
+        </div>
+        <div>
+          <label class="field-label">개체 ID (집단변수)</label>
+          <select class="ctrl" id="sel-viz-sid" onchange="renderViz()"><option value="">-- 선택 --</option></select>
         </div>
       </div>
       <div class="chart-wrap tall" id="viz-chart-wrap">
@@ -367,6 +518,30 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
     <div class="card-title"><span class="step-badge">3</span> 모형 설정 및 분석 실행</div>
 
     <div style="margin-bottom:16px">
+      <label class="field-label">센터링 (Centering)</label>
+      <div class="form-row" style="margin-bottom:0">
+        <div>
+          <label class="field-label" style="font-size:11px">Level-1 독립변수</label>
+          <select class="ctrl" id="sel-l1-centering">
+            <option value="none">센터링 없음 (Raw)</option>
+            <option value="gmc">Grand Mean Centering (전체 평균 중심화)</option>
+            <option value="cwc">Group Mean Centering (집단 평균 중심화)</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" style="font-size:11px">Level-2 공변량</label>
+          <select class="ctrl" id="sel-l2-centering">
+            <option value="none">센터링 없음 (Raw)</option>
+            <option value="gmc">Grand Mean Centering (전체 평균 중심화)</option>
+          </select>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:6px">
+        ※ <strong>GMC</strong>: X − 전체평균. &nbsp; <strong>CWC</strong>: X − 집단평균 (집단평균 변수를 L2에 자동 추가).
+      </p>
+    </div>
+
+    <div style="margin-bottom:16px">
       <label class="field-label">무선기울기 변수 (선택 · Level-1 변수에서)</label>
       <div class="check-group" id="chk-rs" style="max-height:100px">
         <span class="empty-hint">Level-1 독립변수를 선택하면 나타납니다.</span>
@@ -407,6 +582,8 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
       <button class="tab-btn" id="tab-rs-btn" onclick="switchTab('tab-rs',this)">M2 무선기울기</button>
       <button class="tab-btn" id="tab-cl-btn" onclick="switchTab('tab-cl',this)">M3 교차수준</button>
       <button class="tab-btn" onclick="switchTab('tab-comp',this)">📊 모형 비교</button>
+      <button class="tab-btn" id="tab-diag-btn" onclick="switchTab('tab-diag',this)">📈 진단 플롯</button>
+      <button class="tab-btn" onclick="switchTab('tab-formula',this)">📝 모형 공식</button>
     </div>
 
     <!-- 데이터 정보 -->
@@ -450,6 +627,113 @@ td.formula-cell { font-family: monospace; font-size: 12px; color: var(--muted); 
       <div class="tbl-wrap" id="comp-tbl"></div>
       <div class="chart-wrap" id="comp-chart-wrap">
         <canvas id="comp-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- 진단 플롯 -->
+    <div class="tab-pane" id="tab-diag">
+      <div id="diag-content">
+        <div class="alert alert-info">분석을 실행하면 진단 플롯을 확인할 수 있습니다.</div>
+      </div>
+    </div>
+
+    <!-- 모형 공식 -->
+    <div class="tab-pane" id="tab-formula">
+      <div id="formula-content">
+        <div class="alert alert-info">분석을 실행하면 모형 공식을 확인할 수 있습니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 5: AI 보고서 생성 ══ -->
+  <div class="card hidden" id="card-report">
+    <div class="card-title"><span class="step-badge">5</span> AI 보고서 생성</div>
+
+    <!-- AI 제공자 선택 -->
+    <label class="field-label">AI 제공자 선택</label>
+    <div class="ai-provider-group">
+      <button type="button" class="ai-provider-btn selected" onclick="onAIProviderChange('openai')" id="provider-btn-openai">
+        <span class="provider-icon">🤖</span>
+        ChatGPT <span class="ai-provider-badge badge-openai">OpenAI</span>
+      </button>
+      <button type="button" class="ai-provider-btn" onclick="onAIProviderChange('claude')" id="provider-btn-claude">
+        <span class="provider-icon">🧠</span>
+        Claude <span class="ai-provider-badge badge-claude">Anthropic</span>
+      </button>
+      <button type="button" class="ai-provider-btn" onclick="onAIProviderChange('local')" id="provider-btn-local">
+        <span class="provider-icon">🖥️</span>
+        Ollama <span class="ai-provider-badge badge-local">로컬</span>
+      </button>
+    </div>
+
+    <!-- API 키 / 엔드포인트 -->
+    <div class="form-row" id="ai-auth-row">
+      <div id="ai-key-wrap">
+        <label class="field-label" id="ai-key-label">OpenAI API Key</label>
+        <input type="password" class="ctrl" id="ai-api-key" placeholder="sk-..." oninput="validateGenerateBtn()">
+      </div>
+      <div id="ai-endpoint-wrap" style="display:none">
+        <label class="field-label">Ollama 상태</label>
+        <div class="ctrl" style="background:#f0fdf4;color:#059669;font-weight:600;display:flex;align-items:center;gap:6px">
+          <span id="ollama-status-icon">⏳</span>
+          <span id="ollama-status-text">확인 중...</span>
+        </div>
+      </div>
+      <div>
+        <label class="field-label">모델</label>
+        <select class="ctrl" id="ai-model">
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="gpt-4o-mini">GPT-4o Mini</option>
+          <option value="gpt-4-turbo">GPT-4 Turbo</option>
+          <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 보고서 설정 -->
+    <div class="form-row triple">
+      <div>
+        <label class="field-label">보고서 언어</label>
+        <select class="ctrl" id="ai-lang">
+          <option value="ko">한국어</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">보고서 스타일</label>
+        <select class="ctrl" id="ai-style">
+          <option value="academic">학술 보고서</option>
+          <option value="summary">요약 보고서</option>
+          <option value="detailed">상세 보고서</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">추가 맥락 (선택)</label>
+        <input type="text" class="ctrl" id="ai-context" placeholder="연구 목적, 배경 등">
+      </div>
+    </div>
+
+    <!-- 생성 버튼 -->
+    <div style="text-align:center; margin-top:12px">
+      <button class="btn btn-primary btn-lg" id="btn-generate" onclick="generateReport()" disabled>
+        ✨ AI 보고서 생성
+      </button>
+    </div>
+
+    <!-- 로딩 -->
+    <div id="report-loading">
+      <div class="spinner"></div>
+      <span id="report-loading-text">AI가 보고서를 작성 중입니다... 잠시 기다려 주세요.</span>
+    </div>
+
+    <!-- 미리보기 -->
+    <div id="report-preview-section" style="display:none; margin-top:20px">
+      <div class="section-title">보고서 미리보기</div>
+      <div class="report-preview" id="report-preview-content"></div>
+      <div class="report-actions">
+        <button class="btn btn-primary" onclick="downloadWordReport()">📥 Word 다운로드 (.docx)</button>
+        <button class="btn-outline" onclick="copyReportToClipboard()">📋 클립보드 복사</button>
+        <button class="btn-outline" onclick="generateReport()">🔄 다시 생성</button>
       </div>
     </div>
   </div>
@@ -650,7 +934,9 @@ async function runAnalysis() {
   document.getElementById('card-results').classList.add('hidden');
 
   const cross_interactions = getCrossInteractions();
-  const payload = { data: columnData, outcome, group_var, l1_preds, l2_covs, rand_slopes, cross_interactions };
+  const l1_centering = document.getElementById('sel-l1-centering').value;
+  const l2_centering = document.getElementById('sel-l2-centering').value;
+  const payload = { data: columnData, outcome, group_var, l1_preds, l2_covs, rand_slopes, cross_interactions, l1_centering, l2_centering };
 
   try {
     const res  = await fetch(`${API_BASE}/api/analyze`, {
@@ -687,6 +973,8 @@ function renderResults(d) {
   renderRSTab(d.rs_model, d.rs_model_error);
   renderCLTab(d.cl_model, d.cl_model_error);
   renderCompTab(d.model_comparison);
+  renderDiagTab(d.diagnostics);
+  renderFormulaTab(d);
 
   // 탭 버튼 활성화
   document.getElementById('tab-ri-btn').style.opacity = d.ri_model ? '1' : '.4';
@@ -695,6 +983,10 @@ function renderResults(d) {
 
   // 첫 탭으로 초기화
   switchTab('tab-info', document.querySelector('.tab-btn'));
+
+  // AI 보고서 카드 표시
+  document.getElementById('card-report').classList.remove('hidden');
+  validateGenerateBtn();
 }
 
 // ── 데이터 정보 ──
@@ -708,12 +1000,17 @@ function renderInfoTab(d) {
   }
   const nObs    = u(info.n_obs);
   const nGroups = u(info.n_groups);
+  const centLabels = { none: '없음', gmc: 'GMC', cwc: 'CWC' };
+  const l1c = centLabels[u(info.l1_centering)] || '없음';
+  const l2c = centLabels[u(info.l2_centering)] || '없음';
   document.getElementById('info-stats').innerHTML = `
     ${statBox(nObs,    '관측치 수 (N)')}
     ${statBox(nGroups, '집단 수')}
     ${statBox((nObs / nGroups).toFixed(1), '집단당 평균 관측치')}
     ${statBox(u(info.outcome),   '종속변수')}
     ${statBox(u(info.group_var), '집단변수')}
+    ${statBox(l1c, 'L1 센터링')}
+    ${statBox(l2c, 'L2 센터링')}
   `;
 
   let alerts = '';
@@ -924,17 +1221,28 @@ function fixedEffectTable(fes) {
 function randomEffectTable(res) {
   if (!res || res.length === 0) return '<p style="color:var(--muted)">무선효과 없음</p>';
   let html = `<table>
-    <thead><tr><th>집단</th><th>변수1</th><th>변수2</th><th>분산</th><th>표준편차</th></tr></thead><tbody>`;
+    <thead><tr><th>집단</th><th>효과</th><th>유형</th><th>추정값</th><th>SD / 상관</th></tr></thead><tbody>`;
   res.forEach(re => {
-    html += `<tr>
+    const isCov = re.var2 && re.var2 !== '';
+    const isResid = re.group === 'Residual';
+    const typeLbl = isCov ? '공분산' : (isResid ? '잔차 분산' : '분산');
+    const sdLbl   = isCov ? `${fmt(re.sdcor)} <span style="font-size:11px;color:var(--muted)">(상관)</span>`
+                          : `${fmt(re.sdcor)} <span style="font-size:11px;color:var(--muted)">(SD)</span>`;
+    const effect  = isCov ? `${re.var1} &amp; ${re.var2}` : (re.var1 || '-');
+    const rowBg   = isCov ? ' style="background:#fef3c7"' : '';
+    html += `<tr${rowBg}>
       <td>${re.group}</td>
-      <td>${re.var1 || '-'}</td>
-      <td>${re.var2 || '-'}</td>
+      <td>${effect}</td>
+      <td><span style="font-size:12px;font-weight:600;color:${isCov ? 'var(--warning)' : 'var(--primary)'}">${typeLbl}</span></td>
       <td>${fmt(re.vcov)}</td>
-      <td>${fmt(re.sdcor)}</td>
+      <td>${sdLbl}</td>
     </tr>`;
   });
   html += '</tbody></table>';
+  html += `<p style="font-size:11px;color:var(--muted);margin-top:6px">
+    분산 행: 추정값 = 분산(τ²), SD/상관 = 표준편차(τ) &nbsp;|&nbsp;
+    <span style="background:#fef3c7;padding:1px 4px;border-radius:2px">공분산 행</span>: 추정값 = 공분산, SD/상관 = Pearson 상관계수(r)
+  </p>`;
   return html;
 }
 
@@ -1078,12 +1386,12 @@ function renderDescriptiveStats() {
   });
 
   // 시각화 탭 - 셀렉터
-  ['sel-viz-x','sel-viz-y','sel-viz-bval'].forEach(id => {
+  ['sel-viz-x','sel-viz-y','sel-viz-bval','sel-viz-sx','sel-viz-sy'].forEach(id => {
     const s = document.getElementById(id);
     s.innerHTML = '<option value="">-- 선택 --</option>';
     numCols.forEach(col => { s.innerHTML += `<option value="${col}">${col}</option>`; });
   });
-  ['sel-viz-color','sel-viz-bgrp'].forEach(id => {
+  ['sel-viz-color','sel-viz-bgrp','sel-viz-sid'].forEach(id => {
     const s = document.getElementById(id);
     s.innerHTML = id === 'sel-viz-color' ? '<option value="">없음</option>' : '<option value="">-- 선택 --</option>';
     allColumns.forEach(col => { s.innerHTML += `<option value="${col}">${col}</option>`; });
@@ -1141,15 +1449,19 @@ function renderDistribution() {
 
   const min = Math.min(...nums);
   const max = Math.max(...nums);
-  const nBins = Math.max(5, Math.ceil(Math.log2(nums.length) + 1));
+  const nBins = Math.max(8, Math.ceil(Math.log2(nums.length) + 1));
   const binWidth = (max - min) / nBins || 1;
+  const mean = arrMean(nums);
+  const sd   = arrStd(nums);
 
   const bins = Array(nBins).fill(0);
   const labels = [];
+  const binEdges = [];
   for (let i = 0; i < nBins; i++) {
     const lo = min + i * binWidth;
     const hi = lo + binWidth;
-    labels.push(`${lo.toFixed(1)}–${hi.toFixed(1)}`);
+    labels.push(((lo + hi) / 2).toFixed(2));
+    binEdges.push({ lo, hi });
   }
   nums.forEach(v => {
     let idx = Math.floor((v - min) / binWidth);
@@ -1158,28 +1470,57 @@ function renderDistribution() {
     bins[idx]++;
   });
 
+  // 정규분포 곡선 (Normal curve overlay)
+  const normalY = labels.map((_, i) => {
+    const mid = (binEdges[i].lo + binEdges[i].hi) / 2;
+    const z = (mid - mean) / sd;
+    const density = (1 / (sd * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * z * z);
+    return +(density * nums.length * binWidth).toFixed(2);
+  });
+
   if (distChart) { distChart.destroy(); distChart = null; }
   distChart = new Chart(document.getElementById('dist-chart'), {
     type: 'bar',
     data: {
       labels,
-      datasets: [{
-        label: col,
-        data: bins,
-        backgroundColor: 'rgba(37,99,235,.6)',
-        borderColor: 'rgba(37,99,235,1)',
-        borderWidth: 1,
-        borderRadius: 2
-      }]
+      datasets: [
+        {
+          label: '빈도',
+          data: bins,
+          backgroundColor: 'rgba(37,99,235,.55)',
+          borderColor: 'rgba(37,99,235,.9)',
+          borderWidth: 1,
+          barPercentage: 1.0,
+          categoryPercentage: 1.0
+        },
+        {
+          label: '정규분포',
+          data: normalY,
+          type: 'line',
+          borderColor: 'rgba(220,38,38,.8)',
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          tension: 0.4
+        }
+      ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false },
-        title: { display: true, text: `${col} 분포 (N=${nums.length})`, font: { size: 13 } }
+        legend: { labels: { boxWidth: 10, font: { size: 11 } } },
+        title: { display: true, text: `${col} 히스토그램 (N=${nums.length}, M=${mean.toFixed(2)}, SD=${sd.toFixed(2)})`, font: { size: 13 } },
+        tooltip: {
+          callbacks: {
+            title: ctx => {
+              const i = ctx[0].dataIndex;
+              return `${binEdges[i].lo.toFixed(2)} ~ ${binEdges[i].hi.toFixed(2)}`;
+            }
+          }
+        }
       },
       scales: {
-        x: { title: { display: true, text: col } },
+        x: { title: { display: true, text: col }, grid: { display: false } },
         y: { title: { display: true, text: '빈도' }, beginAtZero: true }
       }
     }
@@ -1187,19 +1528,50 @@ function renderDistribution() {
 }
 
 function renderCorrelationMatrix(numCols) {
+  const selEl = document.getElementById('corr-var-selector');
   if (numCols.length < 2) {
+    selEl.innerHTML = '';
     document.getElementById('corr-matrix-tbl').innerHTML =
       '<p style="color:var(--muted)">상관행렬을 계산하려면 수치형 변수가 2개 이상 필요합니다.</p>';
     return;
   }
 
+  // 변수 선택 체크박스
+  let selHtml = '<div class="corr-var-select">';
+  selHtml += '<span class="corr-lbl">변수 선택</span>';
+  selHtml += '<label><input type="checkbox" checked onchange="toggleAllCorrVars(this.checked)"> 전체</label>';
+  selHtml += '<span class="corr-sep">|</span>';
+  numCols.forEach(c => {
+    selHtml += `<label><input type="checkbox" checked value="${c}" class="corr-var-chk" onchange="updateCorrMatrix()"> ${c}</label>`;
+  });
+  selHtml += '</div>';
+  selEl.innerHTML = selHtml;
+
+  updateCorrMatrix();
+}
+
+function toggleAllCorrVars(checked) {
+  document.querySelectorAll('.corr-var-chk').forEach(cb => { cb.checked = checked; });
+  updateCorrMatrix();
+}
+
+function updateCorrMatrix() {
+  const selected = [];
+  document.querySelectorAll('.corr-var-chk:checked').forEach(cb => selected.push(cb.value));
+
+  if (selected.length < 2) {
+    document.getElementById('corr-matrix-tbl').innerHTML =
+      '<p style="color:var(--muted)">상관행렬을 표시하려면 변수를 2개 이상 선택하세요.</p>';
+    return;
+  }
+
   let html = '<table class="corr-table"><thead><tr><th></th>';
-  numCols.forEach(c => { html += `<th>${c}</th>`; });
+  selected.forEach(c => { html += `<th>${c}</th>`; });
   html += '</tr></thead><tbody>';
 
-  numCols.forEach((r, ri) => {
+  selected.forEach((r, ri) => {
     html += `<tr><th style="text-align:left">${r}</th>`;
-    numCols.forEach((c, ci) => {
+    selected.forEach((c, ci) => {
       if (ri === ci) {
         html += '<td style="background:#f1f5f9;font-weight:700">1.000</td>';
       } else {
@@ -1399,6 +1771,195 @@ function fixedEffectTableCL(fes, intTerms) {
 }
 
 // ════════════════════════════════════════
+//  모형 공식 탭 (수학적 표기)
+// ════════════════════════════════════════
+
+function renderFormulaTab(d) {
+  const el = document.getElementById('formula-content');
+  if (!d || !d.null_model) {
+    el.innerHTML = '<div class="alert alert-info">분석을 실행하면 모형 공식을 확인할 수 있습니다.</div>';
+    return;
+  }
+
+  // 사용자 선택값 수집
+  const outcome  = document.getElementById('sel-outcome').value;
+  const groupVar = document.getElementById('sel-group').value;
+  const l1Preds  = getChecked('l1');
+  const l2Covs   = getChecked('l2');
+  const randSlopes = getChecked('rs');
+  const crossInts  = getCrossInteractions();
+
+  // 적합된 모형 목록
+  const models = [
+    { key:'null', label:'M0 기저모형 (Null)', data: d.null_model, type:'null' }
+  ];
+  if (d.ri_model) models.push({ key:'ri', label:'M1 무선절편 (Random Intercept)', data: d.ri_model, type:'ri' });
+  if (d.rs_model) models.push({ key:'rs', label:'M2 무선기울기 (Random Slope)', data: d.rs_model, type:'rs' });
+  if (d.cl_model) models.push({ key:'cl', label:'M3 교차수준 상호작용 (Cross-Level)', data: d.cl_model, type:'cl' });
+
+  // 모형 선택 버튼
+  let html = '<div class="formula-model-select">';
+  models.forEach((m, i) => {
+    html += `<button class="formula-model-btn${i===0?' active':''}" onclick="switchFormulaModel('${m.key}',this)">${m.label}</button>`;
+  });
+  html += '</div>';
+
+  // 각 모형의 공식 카드 (첫 번째만 표시)
+  models.forEach((m, i) => {
+    html += `<div class="formula-card" id="fcard-${m.key}" style="${i>0?'display:none':''}">`;
+    html += `<div class="formula-card-header"><span>${m.label}</span></div>`;
+    html += '<div class="formula-card-body">';
+    html += buildFormulaCard(m.type, outcome, groupVar, l1Preds, l2Covs, randSlopes, crossInts);
+    html += `<div class="formula-section"><div class="formula-section-title">R 코드</div>`;
+    html += `<div class="formula-r-box"><span class="rf">lmer</span>(${escHtml(m.data.formula)}, <span class="rf">data</span> = df, <span class="rf">REML</span> = <span class="rs">FALSE</span>)</div></div>`;
+    html += '</div></div>';
+  });
+
+  el.innerHTML = html;
+}
+
+function switchFormulaModel(key, btn) {
+  document.querySelectorAll('.formula-model-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('[id^="fcard-"]').forEach(c => c.style.display = 'none');
+  const card = document.getElementById('fcard-' + key);
+  if (card) card.style.display = '';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* 수학적 표기 빌더 헬퍼 */
+const fmG = (t) => `<span class="fm-g">${t}</span>`;          // 그리스 문자 (γ, β)
+const fmR = (t) => `<span class="fm-r">${t}</span>`;          // 무선효과 (u, e)
+const fmV = (t) => `<span class="fm-v">${t}</span>`;          // 변수명
+const fmOp = (t) => `<span class="fm-op">${t || '+'}</span>`; // 연산자
+const fmSub = (t) => `<sub>${t}</sub>`;
+
+function buildFormulaCard(modelType, outcome, groupVar, l1Preds, l2Covs, randSlopes, crossInts) {
+  let html = '';
+
+  /* ─── Level 1 ─── */
+  html += '<div class="formula-section"><div class="formula-section-title">Level 1 (개인 수준)</div>';
+
+  // Y_ij = β_0j + Σ β_kj X_kij + e_ij
+  let l1Eq = `${fmV(outcome)}${fmSub('ij')} ${fmOp('=')} ${fmG('β')}${fmSub('0j')}`;
+  if (modelType !== 'null') {
+    l1Preds.forEach((p, k) => {
+      l1Eq += ` ${fmOp('+')} ${fmG('β')}${fmSub((k+1)+'j')} · ${fmV(p)}${fmSub('ij')}`;
+    });
+  }
+  l1Eq += ` ${fmOp('+')} ${fmR('e')}${fmSub('ij')}`;
+  html += `<div class="formula-level"><span class="formula-label">Level 1</span><span class="formula-eq">${l1Eq}</span></div>`;
+  html += '</div>';
+
+  /* ─── Level 2 ─── */
+  html += '<div class="formula-section"><div class="formula-section-title">Level 2 (집단 수준)</div>';
+
+  // 절편 방정식: β_0j = γ_00 + Σ γ_0q W_qj + u_0j
+  let intEq = `${fmG('β')}${fmSub('0j')} ${fmOp('=')} ${fmG('γ')}${fmSub('00')}`;
+  if (modelType !== 'null') {
+    l2Covs.forEach((cov, q) => {
+      intEq += ` ${fmOp('+')} ${fmG('γ')}${fmSub('0'+(q+1))} · ${fmV(cov)}${fmSub('j')}`;
+    });
+  }
+  intEq += ` ${fmOp('+')} ${fmR('u')}${fmSub('0j')}`;
+  html += `<div class="formula-level"><span class="formula-label">β${fmSub('0j')}</span><span class="formula-eq">${intEq}</span></div>`;
+
+  // 기울기 방정식: β_kj = γ_k0 [+ γ_kq W_qj] [+ u_kj]
+  if (modelType !== 'null') {
+    l1Preds.forEach((pred, k) => {
+      const kIdx = k + 1;
+      let slopeEq = `${fmG('β')}${fmSub(kIdx+'j')} ${fmOp('=')} ${fmG('γ')}${fmSub(kIdx+'0')}`;
+
+      // 교차수준 상호작용 항
+      if (modelType === 'cl') {
+        crossInts.forEach(ci => {
+          if (ci.l1 === pred) {
+            const l2Idx = l2Covs.indexOf(ci.l2) + 1;
+            slopeEq += ` ${fmOp('+')} ${fmG('γ')}${fmSub(kIdx+''+(l2Idx > 0 ? l2Idx : '?'))} · ${fmV(ci.l2)}${fmSub('j')}`;
+          }
+        });
+      }
+
+      // 무선기울기
+      const hasRS = (modelType === 'rs' || modelType === 'cl') && randSlopes.includes(pred);
+      if (hasRS) {
+        slopeEq += ` ${fmOp('+')} ${fmR('u')}${fmSub(kIdx+'j')}`;
+      }
+
+      // 부가 설명 태그
+      let note = '';
+      if (hasRS && modelType === 'cl' && crossInts.some(ci => ci.l1 === pred)) {
+        note = ' <span style="font-size:11px;color:var(--muted)">(무선기울기 + 교차수준)</span>';
+      } else if (hasRS) {
+        note = ' <span style="font-size:11px;color:var(--muted)">(무선기울기)</span>';
+      } else {
+        note = ' <span style="font-size:11px;color:var(--muted)">(고정)</span>';
+      }
+
+      html += `<div class="formula-level"><span class="formula-label">β${fmSub(kIdx+'j')}</span><span class="formula-eq">${slopeEq}${note}</span></div>`;
+    });
+  }
+  html += '</div>';
+
+  /* ─── 통합 모형 (Combined) ─── */
+  html += '<div class="formula-section"><div class="formula-section-title">통합 모형 (Combined)</div>';
+  html += '<div class="formula-combined-box"><div class="formula-eq">';
+
+  let cEq = `${fmV(outcome)}${fmSub('ij')} ${fmOp('=')} ${fmG('γ')}${fmSub('00')}`;
+
+  if (modelType !== 'null') {
+    // L1 고정효과: γ_k0 * X_k
+    l1Preds.forEach((pred, k) => {
+      cEq += ` ${fmOp('+')} ${fmG('γ')}${fmSub((k+1)+'0')} · ${fmV(pred)}${fmSub('ij')}`;
+    });
+    // L2 고정효과: γ_0q * W_q
+    l2Covs.forEach((cov, q) => {
+      cEq += ` ${fmOp('+')} ${fmG('γ')}${fmSub('0'+(q+1))} · ${fmV(cov)}${fmSub('j')}`;
+    });
+    // 교차수준 상호작용: γ_kq * X_k * W_q
+    if (modelType === 'cl') {
+      crossInts.forEach(ci => {
+        const kIdx = l1Preds.indexOf(ci.l1) + 1;
+        const qIdx = l2Covs.indexOf(ci.l2) + 1;
+        if (kIdx > 0 && qIdx > 0) {
+          cEq += ` ${fmOp('+')} ${fmG('γ')}${fmSub(kIdx+''+qIdx)} · ${fmV(ci.l1)}${fmSub('ij')} · ${fmV(ci.l2)}${fmSub('j')}`;
+        }
+      });
+    }
+  }
+
+  // 무선효과부
+  cEq += ` ${fmOp('+')} ${fmR('u')}${fmSub('0j')}`;
+  if (modelType === 'rs' || modelType === 'cl') {
+    l1Preds.forEach((pred, k) => {
+      if (randSlopes.includes(pred)) {
+        cEq += ` ${fmOp('+')} ${fmR('u')}${fmSub((k+1)+'j')} · ${fmV(pred)}${fmSub('ij')}`;
+      }
+    });
+  }
+  cEq += ` ${fmOp('+')} ${fmR('e')}${fmSub('ij')}`;
+
+  html += cEq;
+  html += '</div></div></div>';
+
+  /* ─── 범례 ─── */
+  html += `<div style="margin-top:14px;padding:10px 14px;background:#f8fafc;border-radius:6px;font-size:12px;color:var(--muted);line-height:1.8">
+    <strong>범례:</strong>
+    <span class="fm-g" style="font-family:serif">γ</span> = 고정효과 계수 &nbsp;|&nbsp;
+    <span class="fm-r" style="font-family:serif">u</span><sub>0j</sub> = 무선절편 (집단 간 절편 차이) &nbsp;|&nbsp;
+    <span class="fm-r" style="font-family:serif">u</span><sub>kj</sub> = 무선기울기 (집단 간 기울기 차이) &nbsp;|&nbsp;
+    <span class="fm-r" style="font-family:serif">e</span><sub>ij</sub> = 잔차 (개인 수준 오차)<br>
+    ${fmSub('ij')} = 집단 <em>j</em>의 개인 <em>i</em> &nbsp;|&nbsp;
+    ${fmSub('j')} = 집단 수준 변수
+  </div>`;
+
+  return html;
+}
+
+// ════════════════════════════════════════
 //  시각화 탭 (산점도 / 박스플롯)
 // ════════════════════════════════════════
 let vizChart = null;
@@ -1411,15 +1972,17 @@ const VIZ_COLORS = [
 
 function onVizTypeChange() {
   const t = document.getElementById('sel-viz-type').value;
-  document.getElementById('viz-scatter-opts').style.display = t === 'scatter' ? '' : 'none';
-  document.getElementById('viz-box-opts').style.display     = t === 'box'     ? '' : 'none';
+  document.getElementById('viz-scatter-opts').style.display    = t === 'scatter'   ? '' : 'none';
+  document.getElementById('viz-box-opts').style.display        = t === 'box'       ? '' : 'none';
+  document.getElementById('viz-spaghetti-opts').style.display  = t === 'spaghetti' ? '' : 'none';
   if (vizChart) { vizChart.destroy(); vizChart = null; }
 }
 
 function renderViz() {
   const t = document.getElementById('sel-viz-type').value;
   if (t === 'scatter') renderScatter();
-  else renderBoxPlot();
+  else if (t === 'box') renderBoxPlot();
+  else if (t === 'spaghetti') renderSpaghetti();
 }
 
 function renderScatter() {
@@ -1539,6 +2102,1548 @@ function renderBoxPlot() {
         y: { title: { display: true, text: vCol } }
       }
     }
+  });
+}
+
+// ════════════════════════════════════════
+//  스파게티 플롯 (개인 궤적)
+// ════════════════════════════════════════
+function renderSpaghetti() {
+  const xCol = document.getElementById('sel-viz-sx').value;
+  const yCol = document.getElementById('sel-viz-sy').value;
+  const idCol = document.getElementById('sel-viz-sid').value;
+  if (!xCol || !yCol || !idCol) return;
+
+  // 개체별 데이터 수집
+  const individuals = {};
+  parsedData.forEach(row => {
+    const id = row[idCol];
+    const x = parseFloat(row[xCol]);
+    const y = parseFloat(row[yCol]);
+    if (id === '' || id == null || isNaN(x) || isNaN(y)) return;
+    if (!individuals[id]) individuals[id] = [];
+    individuals[id].push({ x, y });
+  });
+
+  const ids = Object.keys(individuals);
+  if (ids.length === 0) return;
+  if (ids.length > 200) {
+    alert('개체 수가 200개를 초과합니다. 시각화가 어렵습니다.');
+    return;
+  }
+
+  // 각 개체 내 x 기준 정렬
+  ids.forEach(id => individuals[id].sort((a, b) => a.x - b.x));
+
+  // 전체 평균 궤적 계산
+  const allX = new Set();
+  ids.forEach(id => individuals[id].forEach(p => allX.add(p.x)));
+  const sortedX = [...allX].sort((a, b) => a - b);
+  const meanY = sortedX.map(xv => {
+    let sum = 0, cnt = 0;
+    ids.forEach(id => {
+      const pt = individuals[id].find(p => p.x === xv);
+      if (pt) { sum += pt.y; cnt++; }
+    });
+    return cnt > 0 ? sum / cnt : null;
+  });
+
+  // 개체별 dataset (얇은 회색 선)
+  const datasets = ids.map(id => ({
+    label: id,
+    data: individuals[id],
+    borderColor: 'rgba(148,163,184,0.35)',
+    borderWidth: 1,
+    pointRadius: 0,
+    fill: false,
+    showLine: true,
+    tension: 0.1
+  }));
+
+  // 평균 궤적 (굵은 파란 선)
+  datasets.push({
+    label: '전체 평균',
+    data: sortedX.map((x, i) => ({ x, y: meanY[i] })).filter(p => p.y !== null),
+    borderColor: 'rgba(37,99,235,1)',
+    borderWidth: 3,
+    pointRadius: 4,
+    pointBackgroundColor: 'rgba(37,99,235,1)',
+    fill: false,
+    showLine: true,
+    tension: 0.2
+  });
+
+  if (vizChart) { vizChart.destroy(); vizChart = null; }
+
+  vizChart = new Chart(document.getElementById('viz-chart'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: `개인 궤적: ${yCol} by ${xCol} (N=${ids.length})`, font: { size: 13 } },
+        legend: {
+          display: true,
+          labels: {
+            filter: item => item.text === '전체 평균',
+            boxWidth: 14, font: { size: 12 }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            title: ctx => {
+              const ds = ctx[0].dataset;
+              return ds.label === '전체 평균' ? '전체 평균' : `ID: ${ds.label}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { title: { display: true, text: xCol }, type: 'linear' },
+        y: { title: { display: true, text: yCol } }
+      },
+      showLine: true
+    }
+  });
+}
+
+// ════════════════════════════════════════
+//  진단 플롯 (Diagnostic Plots)
+// ════════════════════════════════════════
+let diagChart = null;
+let diagData  = null;
+
+function renderDiagTab(d) {
+  const el = document.getElementById('diag-content');
+  console.log('[진단] diagnostics 데이터:', d);
+  if (!d || d.error) {
+    const errMsg = d?.error ? ` (${d.error})` : ' — API 응답에 diagnostics 필드가 없습니다. R 서버를 재시작하세요.';
+    el.innerHTML = `<div class="alert alert-warning">진단 데이터를 추출할 수 없습니다.${errMsg}</div>`;
+    return;
+  }
+  diagData = d;
+
+  // 배열 보장 헬퍼 (deepUnbox가 단일 요소 배열을 스칼라로 변환할 수 있음)
+  const toArr = v => !v ? [] : Array.isArray(v) ? v : [v];
+  // 무선효과 드롭다운 옵션
+  const reOpts = toArr(d.re_names).map(n => `<option value="${n}">${n === '(Intercept)' ? '절편 (u0)' : n}</option>`).join('');
+  // 독립변수 드롭다운 옵션
+  const predOpts = toArr(d.predictor_names).map(n => `<option value="${n}">${n}</option>`).join('');
+
+  el.innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:14px">
+      <strong>${d.model_name}</strong> 기준 진단 플롯 &nbsp;|&nbsp; 관측치 ${d.predicted ? d.predicted.length : 0}개
+    </div>
+    <div class="diag-controls">
+      <div>
+        <label class="field-label">차트 유형</label>
+        <select class="ctrl" id="sel-diag-type" onchange="onDiagTypeChange()">
+          <option value="resid_hist">잔차 히스토그램</option>
+          <option value="resid_fitted">잔차 vs 예측값</option>
+          <option value="resid_qq">잔차 Q-Q 플롯</option>
+          <option value="resid_var">잔차 vs 독립변수</option>
+          <option value="re_hist">무선효과 히스토그램</option>
+          <option value="re_qq">무선효과 Q-Q 플롯</option>
+          <option value="reg_overall">회귀선 (전체)</option>
+          <option value="reg_group">회귀선 (집단별)</option>
+          <option value="pairs">변수 쌍 행렬 (Pairs Plot)</option>
+        </select>
+      </div>
+      <div id="diag-var-wrap" style="display:none">
+        <label class="field-label">독립변수 선택</label>
+        <select class="ctrl" id="sel-diag-var" onchange="onDiagTypeChange()">
+          ${predOpts || '<option value="">없음</option>'}
+        </select>
+      </div>
+      <div id="diag-regx-wrap" style="display:none">
+        <label class="field-label">X 변수 (독립변수)</label>
+        <select class="ctrl" id="sel-diag-regx" onchange="onDiagTypeChange()">
+          ${predOpts || '<option value="">없음</option>'}
+        </select>
+      </div>
+      <div id="diag-re-wrap" style="display:none">
+        <label class="field-label">무선효과 선택</label>
+        <select class="ctrl" id="sel-diag-re" onchange="onDiagTypeChange()">
+          ${reOpts || '<option value="">없음</option>'}
+        </select>
+      </div>
+      <div id="diag-grpn-wrap" style="display:none">
+        <label class="field-label">표시 집단 수</label>
+        <select class="ctrl" id="sel-diag-grpn" onchange="onDiagTypeChange()">
+          <option value="5">5개</option>
+          <option value="10">10개</option>
+          <option value="15" selected>15개</option>
+          <option value="20">20개</option>
+          <option value="30">30개</option>
+          <option value="50">50개</option>
+          <option value="0">전체</option>
+        </select>
+      </div>
+    </div>
+    <div class="diag-chart-wrap" id="diag-single-wrap">
+      <canvas id="diag-chart"></canvas>
+    </div>
+    <div id="diag-pairs-wrap" style="display:none"></div>`;
+
+  onDiagTypeChange();
+}
+
+let pairsCharts = [];
+function destroyPairsCharts() {
+  pairsCharts.forEach(c => { try { c.destroy(); } catch(e){} });
+  pairsCharts = [];
+}
+
+function onDiagTypeChange() {
+  const t = document.getElementById('sel-diag-type').value;
+  document.getElementById('diag-var-wrap').style.display  = t === 'resid_var' ? '' : 'none';
+  document.getElementById('diag-re-wrap').style.display   = (t === 're_hist' || t === 're_qq') ? '' : 'none';
+  document.getElementById('diag-regx-wrap').style.display = (t === 'reg_overall' || t === 'reg_group') ? '' : 'none';
+  document.getElementById('diag-grpn-wrap').style.display = t === 'reg_group' ? '' : 'none';
+
+  if (diagChart) { diagChart.destroy(); diagChart = null; }
+  destroyPairsCharts();
+
+  const singleWrap = document.getElementById('diag-single-wrap');
+  const pairsWrap  = document.getElementById('diag-pairs-wrap');
+  if (t === 'pairs') {
+    singleWrap.style.display = 'none';
+    pairsWrap.style.display  = '';
+  } else {
+    singleWrap.style.display = '';
+    pairsWrap.style.display  = 'none';
+  }
+
+  if (!diagData) return;
+
+  switch (t) {
+    case 'resid_hist':   renderResidHistogram();    break;
+    case 'resid_fitted': renderResidVsFitted();     break;
+    case 'resid_qq':     renderResidQQ();           break;
+    case 'resid_var':    renderResidVsVar();        break;
+    case 're_hist':      renderREHistogram();       break;
+    case 're_qq':        renderREQQ();              break;
+    case 'reg_overall':  renderRegressionOverall(); break;
+    case 'reg_group':    renderRegressionByGroup(); break;
+    case 'pairs':        renderPairsPlot();         break;
+  }
+}
+
+function renderResidHistogram() {
+  const zr = diagData.zresid;
+  if (!zr || zr.length === 0) return;
+
+  const min = Math.min(...zr);
+  const max = Math.max(...zr);
+  const nBins = Math.max(8, Math.ceil(Math.log2(zr.length) + 1));
+  const bw = (max - min) / nBins || 1;
+  const bins = Array(nBins).fill(0);
+  const labels = [];
+  for (let i = 0; i < nBins; i++) {
+    labels.push((min + i * bw + bw / 2).toFixed(2));
+  }
+  zr.forEach(v => {
+    let idx = Math.floor((v - min) / bw);
+    if (idx >= nBins) idx = nBins - 1;
+    if (idx < 0) idx = 0;
+    bins[idx]++;
+  });
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '빈도',
+        data: bins,
+        backgroundColor: 'rgba(37,99,235,.55)',
+        borderColor: 'rgba(37,99,235,.9)',
+        borderWidth: 1,
+        borderRadius: 2
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: '표준화 잔차 분포 (Standardized Residuals)', font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: '표준화 잔차 (z)' } },
+        y: { title: { display: true, text: '빈도' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function renderResidVsFitted() {
+  const pred = diagData.predicted;
+  const resid = diagData.residuals;
+  if (!pred || !resid) return;
+
+  const pts = pred.map((p, i) => ({ x: p, y: resid[i] }));
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: '잔차',
+        data: pts,
+        backgroundColor: 'rgba(37,99,235,.45)',
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: '잔차 vs 예측값 (Residuals vs Fitted)', font: { size: 13 } },
+        annotation: undefined
+      },
+      scales: {
+        x: { title: { display: true, text: '예측값 (Fitted)' } },
+        y: { title: { display: true, text: '잔차 (Residual)' } }
+      }
+    }
+  });
+}
+
+function qnorm(p) {
+  // Rational approximation (Abramowitz & Stegun 26.2.23)
+  if (p <= 0) return -Infinity;
+  if (p >= 1) return Infinity;
+  if (p === 0.5) return 0;
+  const a = p < 0.5 ? p : 1 - p;
+  const t = Math.sqrt(-2 * Math.log(a));
+  const c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+  const d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+  let x = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+  if (p < 0.5) x = -x;
+  return x;
+}
+
+function renderResidQQ() {
+  const zr = diagData.zresid.slice().sort((a, b) => a - b);
+  const n = zr.length;
+  if (n === 0) return;
+
+  const theoretical = [];
+  for (let i = 0; i < n; i++) {
+    theoretical.push(qnorm((i + 0.5) / n));
+  }
+
+  const pts = theoretical.map((t, i) => ({ x: t, y: zr[i] }));
+  const minV = Math.min(theoretical[0], zr[0]);
+  const maxV = Math.max(theoretical[n - 1], zr[n - 1]);
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Q-Q',
+          data: pts,
+          backgroundColor: 'rgba(37,99,235,.5)',
+          pointRadius: 3
+        },
+        {
+          label: '기준선 (y=x)',
+          data: [{ x: minV, y: minV }, { x: maxV, y: maxV }],
+          type: 'line',
+          borderColor: 'rgba(220,38,38,.7)',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 0,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 10, font: { size: 11 } } },
+        title: { display: true, text: '잔차 Q-Q 플롯 (Normal Q-Q Plot)', font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: '이론적 분위수 (Theoretical Quantiles)' } },
+        y: { title: { display: true, text: '표준화 잔차 (Sample Quantiles)' } }
+      }
+    }
+  });
+}
+
+function renderResidVsVar() {
+  const varName = document.getElementById('sel-diag-var').value;
+  if (!varName || !diagData.predictor_values || !diagData.predictor_values[varName]) return;
+
+  const xVals = diagData.predictor_values[varName];
+  const resid = diagData.residuals;
+  const pts = [];
+  for (let i = 0; i < xVals.length; i++) {
+    if (xVals[i] !== null && !isNaN(xVals[i]) && resid[i] !== null && !isNaN(resid[i])) {
+      pts.push({ x: xVals[i], y: resid[i] });
+    }
+  }
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: '잔차',
+        data: pts,
+        backgroundColor: 'rgba(5,150,105,.45)',
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: `잔차 vs ${varName}`, font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: varName } },
+        y: { title: { display: true, text: '잔차 (Residual)' } }
+      }
+    }
+  });
+}
+
+function getREValues(reName) {
+  if (!diagData || !diagData.re_data) return [];
+  const re = diagData.re_data.find(r => r.name === reName);
+  return re ? re.values : [];
+}
+
+function renderREHistogram() {
+  const reName = document.getElementById('sel-diag-re').value;
+  const vals = getREValues(reName);
+  if (vals.length === 0) return;
+
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const nBins = Math.max(6, Math.ceil(Math.log2(vals.length) + 1));
+  const bw = (max - min) / nBins || 1;
+  const bins = Array(nBins).fill(0);
+  const labels = [];
+  for (let i = 0; i < nBins; i++) {
+    labels.push((min + i * bw + bw / 2).toFixed(3));
+  }
+  vals.forEach(v => {
+    let idx = Math.floor((v - min) / bw);
+    if (idx >= nBins) idx = nBins - 1;
+    if (idx < 0) idx = 0;
+    bins[idx]++;
+  });
+
+  const displayName = reName === '(Intercept)' ? '절편 (u0)' : reName;
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '빈도',
+        data: bins,
+        backgroundColor: 'rgba(124,58,237,.5)',
+        borderColor: 'rgba(124,58,237,.85)',
+        borderWidth: 1,
+        borderRadius: 2
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: `무선효과 BLUP 분포: ${displayName} (N=${vals.length})`, font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: displayName } },
+        y: { title: { display: true, text: '빈도' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function renderREQQ() {
+  const reName = document.getElementById('sel-diag-re').value;
+  const vals = getREValues(reName).slice().sort((a, b) => a - b);
+  const n = vals.length;
+  if (n === 0) return;
+
+  const mean = vals.reduce((s, v) => s + v, 0) / n;
+  const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1)) || 1;
+  const zvals = vals.map(v => (v - mean) / sd);
+
+  const theoretical = [];
+  for (let i = 0; i < n; i++) {
+    theoretical.push(qnorm((i + 0.5) / n));
+  }
+
+  const pts = theoretical.map((t, i) => ({ x: t, y: zvals[i] }));
+  const minV = Math.min(theoretical[0], zvals[0]);
+  const maxV = Math.max(theoretical[n - 1], zvals[n - 1]);
+
+  const displayName = reName === '(Intercept)' ? '절편 (u0)' : reName;
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Q-Q',
+          data: pts,
+          backgroundColor: 'rgba(124,58,237,.55)',
+          pointRadius: 4
+        },
+        {
+          label: '기준선 (y=x)',
+          data: [{ x: minV, y: minV }, { x: maxV, y: maxV }],
+          type: 'line',
+          borderColor: 'rgba(220,38,38,.7)',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 0,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 10, font: { size: 11 } } },
+        title: { display: true, text: `무선효과 Q-Q 플롯: ${displayName} (N=${n})`, font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: '이론적 분위수' } },
+        y: { title: { display: true, text: '표준화 무선효과' } }
+      }
+    }
+  });
+}
+
+// ════════════════════════════════════════
+//  Pairs Plot (ggpairs 스타일 변수 쌍 행렬)
+// ════════════════════════════════════════
+const PAIRS_COLORS = [
+  '#00AFBB','#E7B800','#FC4E07','#7B68EE','#20B2AA',
+  '#FF6B6B','#48C9B0','#AF7AC5','#5DADE2','#F39C12',
+  '#1ABC9C','#E74C3C','#3498DB','#2ECC71','#9B59B6'
+];
+
+function renderPairsPlot() {
+  const d = diagData;
+  const wrap = document.getElementById('diag-pairs-wrap');
+  if (!d) { wrap.innerHTML = ''; return; }
+
+  // 변수 수집: 종속변수 + 독립변수 (수치형만)
+  const varNames = [];
+  const varArrays = {};
+
+  // 종속변수
+  if (d.outcome_name && d.outcome_values) {
+    varNames.push(d.outcome_name);
+    varArrays[d.outcome_name] = d.outcome_values;
+  }
+  // 독립변수
+  (d.predictor_names || []).forEach(v => {
+    if (d.predictor_values && d.predictor_values[v] && !varNames.includes(v)) {
+      varNames.push(v);
+      varArrays[v] = d.predictor_values[v];
+    }
+  });
+
+  const nVar = varNames.length;
+  if (nVar < 2) {
+    wrap.innerHTML = '<div class="alert alert-warning">Pairs Plot을 그리려면 수치형 변수가 2개 이상 필요합니다.</div>';
+    return;
+  }
+  if (nVar > 7) {
+    varNames.splice(7);
+  }
+  const N = varNames.length;
+
+  // 집단 데이터 구성
+  const gVals = d.group_values || [];
+  const gName = d.group_name || '';
+  const uniqueGroups = [...new Set(gVals)].sort();
+  const colorByGroup = uniqueGroups.length >= 2 && uniqueGroups.length <= 15;
+  const gColorMap = {};
+  if (colorByGroup) {
+    uniqueGroups.forEach((g, i) => { gColorMap[g] = PAIRS_COLORS[i % PAIRS_COLORS.length]; });
+  }
+
+  // 셀 크기 계산
+  const cellSize = Math.max(100, Math.min(180, Math.floor(700 / N)));
+  const totalSize = cellSize * N + (N - 1) * 3;
+
+  let html = `<div class="pairs-grid" style="grid-template-columns:repeat(${N},${cellSize}px);width:${totalSize}px;max-width:100%;overflow-x:auto">`;
+
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      if (r === c) {
+        // 대각선: 히스토그램 + 변수명
+        html += `<div class="pairs-cell" style="height:${cellSize}px">
+          <div class="pairs-diag-label">${varNames[r]}</div>
+          <canvas id="pairs-${r}-${c}"></canvas></div>`;
+      } else if (r > c) {
+        // 하삼각: 산점도
+        html += `<div class="pairs-cell" style="height:${cellSize}px">
+          <canvas id="pairs-${r}-${c}"></canvas></div>`;
+      } else {
+        // 상삼각: 상관계수
+        const a1 = varArrays[varNames[r]];
+        const a2 = varArrays[varNames[c]];
+        const corr = pairsPearson(a1, a2);
+        const absR = Math.abs(corr);
+        const fontSize = Math.max(11, Math.min(22, Math.round(11 + absR * 14)));
+        const corrColor = isNaN(corr) ? '#999' : corr > 0
+          ? `rgba(220,38,38,${(0.4 + absR * 0.6).toFixed(2)})`
+          : `rgba(37,99,235,${(0.4 + absR * 0.6).toFixed(2)})`;
+        const corrTxt = isNaN(corr) ? '-' : corr.toFixed(3);
+        const stars = isNaN(corr) ? '' : absR > 0.5 ? ' ***' : absR > 0.3 ? ' **' : absR > 0.1 ? ' *' : '';
+        html += `<div class="pairs-corr" style="height:${cellSize}px">
+          <span class="corr-val" style="font-size:${fontSize}px;font-weight:700;color:${corrColor}">${corrTxt}</span>
+          <span style="font-size:10px;color:var(--muted)">${stars}</span></div>`;
+      }
+    }
+  }
+  html += '</div>';
+  if (N < varNames.length) {
+    html += `<p style="font-size:11px;color:var(--muted);margin-top:6px">※ 변수가 7개를 초과하여 처음 7개만 표시합니다.</p>`;
+  }
+  if (colorByGroup) {
+    html += `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <span style="font-size:12px;font-weight:600;color:var(--muted)">${gName}:</span>`;
+    uniqueGroups.forEach((g, i) => {
+      html += `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${PAIRS_COLORS[i % PAIRS_COLORS.length]}"></span>${g}</span>`;
+    });
+    html += '</div>';
+  }
+  wrap.innerHTML = html;
+
+  // 차트 렌더링 (비동기로 분리하여 DOM이 준비된 후 실행)
+  requestAnimationFrame(() => {
+    for (let r = 0; r < N; r++) {
+      for (let c = 0; c < N; c++) {
+        const canvasId = `pairs-${r}-${c}`;
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) continue;
+
+        if (r === c) {
+          // 대각선: 히스토그램
+          pairsCharts.push(pairsDiagHist(canvas, varArrays[varNames[r]], varNames[r], gVals, gColorMap, colorByGroup, uniqueGroups));
+        } else if (r > c) {
+          // 하삼각: 산점도
+          pairsCharts.push(pairsScatter(canvas, varArrays[varNames[c]], varArrays[varNames[r]], gVals, gColorMap, colorByGroup));
+        }
+      }
+    }
+  });
+}
+
+function pairsPearson(a1, a2) {
+  const pairs = [];
+  for (let i = 0; i < a1.length; i++) {
+    if (a1[i] != null && !isNaN(a1[i]) && a2[i] != null && !isNaN(a2[i])) pairs.push([a1[i], a2[i]]);
+  }
+  const n = pairs.length;
+  if (n < 3) return NaN;
+  const m1 = pairs.reduce((s, p) => s + p[0], 0) / n;
+  const m2 = pairs.reduce((s, p) => s + p[1], 0) / n;
+  let num = 0, d1 = 0, d2 = 0;
+  for (const [a, b] of pairs) { num += (a - m1) * (b - m2); d1 += (a - m1) ** 2; d2 += (b - m2) ** 2; }
+  const denom = Math.sqrt(d1 * d2);
+  return denom === 0 ? NaN : num / denom;
+}
+
+function pairsDiagHist(canvas, vals, name, gVals, gColorMap, colorByGroup, uniqueGroups) {
+  const nums = vals.filter(v => v != null && !isNaN(v));
+  if (nums.length === 0) return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] } });
+
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const nBins = Math.max(6, Math.ceil(Math.log2(nums.length) + 1));
+  const bw = (max - min) / nBins || 1;
+  const labels = [];
+  for (let i = 0; i < nBins; i++) labels.push((min + i * bw + bw / 2).toFixed(1));
+
+  let datasets;
+  if (colorByGroup && gVals.length === vals.length) {
+    // 집단별 stacked 히스토그램
+    datasets = uniqueGroups.map((g, gi) => {
+      const bins = Array(nBins).fill(0);
+      for (let i = 0; i < vals.length; i++) {
+        if (gVals[i] !== g || vals[i] == null || isNaN(vals[i])) continue;
+        let idx = Math.floor((vals[i] - min) / bw);
+        if (idx >= nBins) idx = nBins - 1;
+        if (idx < 0) idx = 0;
+        bins[idx]++;
+      }
+      return {
+        label: g,
+        data: bins,
+        backgroundColor: PAIRS_COLORS[gi % PAIRS_COLORS.length] + 'AA',
+        borderWidth: 0,
+        borderRadius: 1
+      };
+    });
+  } else {
+    const bins = Array(nBins).fill(0);
+    nums.forEach(v => {
+      let idx = Math.floor((v - min) / bw);
+      if (idx >= nBins) idx = nBins - 1;
+      if (idx < 0) idx = 0;
+      bins[idx]++;
+    });
+    datasets = [{ data: bins, backgroundColor: 'rgba(37,99,235,.5)', borderWidth: 0, borderRadius: 1 }];
+  }
+
+  return new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, title: { display: false } },
+      scales: {
+        x: { display: false, stacked: colorByGroup },
+        y: { display: false, stacked: colorByGroup, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function pairsScatter(canvas, xArr, yArr, gVals, gColorMap, colorByGroup) {
+  const pts = [];
+  const colors = [];
+  for (let i = 0; i < xArr.length; i++) {
+    if (xArr[i] == null || isNaN(xArr[i]) || yArr[i] == null || isNaN(yArr[i])) continue;
+    pts.push({ x: xArr[i], y: yArr[i] });
+    colors.push(colorByGroup && gColorMap[gVals[i]] ? gColorMap[gVals[i]] + 'AA' : 'rgba(37,99,235,.35)');
+  }
+
+  return new Chart(canvas, {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        data: pts,
+        backgroundColor: colors,
+        pointRadius: Math.max(1.5, Math.min(3, 800 / pts.length)),
+        pointHoverRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, title: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false } }
+    }
+  });
+}
+
+// OLS 회귀 계수 계산 (단순선형회귀)
+function olsFit(xArr, yArr) {
+  let n = 0, sx = 0, sy = 0, sxy = 0, sx2 = 0;
+  for (let i = 0; i < xArr.length; i++) {
+    if (isNaN(xArr[i]) || isNaN(yArr[i])) continue;
+    n++; sx += xArr[i]; sy += yArr[i]; sxy += xArr[i] * yArr[i]; sx2 += xArr[i] * xArr[i];
+  }
+  if (n < 2) return null;
+  const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+  const intercept = (sy - slope * sx) / n;
+  return { slope, intercept, n };
+}
+
+function renderRegressionOverall() {
+  const xName = document.getElementById('sel-diag-regx').value;
+  if (!xName || !diagData.predictor_values || !diagData.predictor_values[xName]) return;
+  const xVals = diagData.predictor_values[xName];
+  const yVals = diagData.outcome_values;
+  const yName = diagData.outcome_name;
+  if (!yVals) return;
+
+  // scatter points
+  const pts = [];
+  const xValid = [], yValid = [];
+  for (let i = 0; i < xVals.length; i++) {
+    if (xVals[i] != null && !isNaN(xVals[i]) && yVals[i] != null && !isNaN(yVals[i])) {
+      pts.push({ x: xVals[i], y: yVals[i] });
+      xValid.push(xVals[i]); yValid.push(yVals[i]);
+    }
+  }
+  if (pts.length < 2) return;
+
+  const fit = olsFit(xValid, yValid);
+  const xMin = Math.min(...xValid);
+  const xMax = Math.max(...xValid);
+  const lineData = [
+    { x: xMin, y: fit.intercept + fit.slope * xMin },
+    { x: xMax, y: fit.intercept + fit.slope * xMax }
+  ];
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: `${yName} vs ${xName}`,
+          data: pts,
+          backgroundColor: 'rgba(37,99,235,.35)',
+          pointRadius: 3
+        },
+        {
+          label: `회귀선 (B=${fit.slope.toFixed(3)})`,
+          data: lineData,
+          type: 'line',
+          borderColor: 'rgba(220,38,38,.85)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 10, font: { size: 11 } } },
+        title: { display: true, text: `${yName} ~ ${xName}  (N=${pts.length}, B=${fit.slope.toFixed(4)})`, font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: xName } },
+        y: { title: { display: true, text: yName } }
+      }
+    }
+  });
+}
+
+const REG_COLORS = [
+  'rgba(37,99,235,.7)','rgba(220,38,38,.7)','rgba(5,150,105,.7)',
+  'rgba(217,119,6,.7)','rgba(124,58,237,.7)','rgba(236,72,153,.7)',
+  'rgba(20,184,166,.7)','rgba(245,158,11,.7)','rgba(99,102,241,.7)',
+  'rgba(16,185,129,.7)','rgba(239,68,68,.7)','rgba(14,165,233,.7)',
+  'rgba(168,85,247,.7)','rgba(234,179,8,.7)','rgba(6,182,212,.7)',
+  'rgba(249,115,22,.7)','rgba(139,92,246,.7)','rgba(34,197,94,.7)',
+  'rgba(244,63,94,.7)','rgba(59,130,246,.7)'
+];
+
+function renderRegressionByGroup() {
+  const xName = document.getElementById('sel-diag-regx').value;
+  if (!xName || !diagData.predictor_values || !diagData.predictor_values[xName]) return;
+  const xVals  = diagData.predictor_values[xName];
+  const yVals  = diagData.outcome_values;
+  const yName  = diagData.outcome_name;
+  const gVals  = diagData.group_values;
+  const gName  = diagData.group_name;
+  if (!yVals || !gVals) return;
+
+  // group data
+  const groups = {};
+  for (let i = 0; i < xVals.length; i++) {
+    if (xVals[i] == null || isNaN(xVals[i]) || yVals[i] == null || isNaN(yVals[i])) continue;
+    const g = gVals[i];
+    if (!groups[g]) groups[g] = { x: [], y: [], pts: [] };
+    groups[g].x.push(xVals[i]);
+    groups[g].y.push(yVals[i]);
+    groups[g].pts.push({ x: xVals[i], y: yVals[i] });
+  }
+
+  const keys = Object.keys(groups).sort();
+  if (keys.length === 0) return;
+  const maxGroups = parseInt(document.getElementById('sel-diag-grpn').value) || 0;
+  const showKeys = (maxGroups > 0 && keys.length > maxGroups) ? keys.slice(0, maxGroups) : keys;
+
+  const datasets = [];
+  showKeys.forEach((g, idx) => {
+    const color = REG_COLORS[idx % REG_COLORS.length];
+    // scatter points
+    datasets.push({
+      label: `${gName}=${g}`,
+      data: groups[g].pts,
+      backgroundColor: color,
+      pointRadius: 2.5,
+      showLine: false
+    });
+    // regression line per group
+    const fit = olsFit(groups[g].x, groups[g].y);
+    if (fit) {
+      const xMin = Math.min(...groups[g].x);
+      const xMax = Math.max(...groups[g].x);
+      datasets.push({
+        label: '',
+        data: [
+          { x: xMin, y: fit.intercept + fit.slope * xMin },
+          { x: xMax, y: fit.intercept + fit.slope * xMax }
+        ],
+        type: 'line',
+        borderColor: color,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false
+      });
+    }
+  });
+
+  // overall regression line
+  const allX = [], allY = [];
+  keys.forEach(g => { allX.push(...groups[g].x); allY.push(...groups[g].y); });
+  const overallFit = olsFit(allX, allY);
+  if (overallFit) {
+    const xMin = Math.min(...allX);
+    const xMax = Math.max(...allX);
+    datasets.push({
+      label: '전체 회귀선',
+      data: [
+        { x: xMin, y: overallFit.intercept + overallFit.slope * xMin },
+        { x: xMax, y: overallFit.intercept + overallFit.slope * xMax }
+      ],
+      type: 'line',
+      borderColor: 'rgba(0,0,0,.85)',
+      borderWidth: 3,
+      borderDash: [8, 4],
+      pointRadius: 0,
+      fill: false
+    });
+  }
+
+  const truncNote = (maxGroups > 0 && keys.length > maxGroups) ? ` (${maxGroups}/${keys.length} 집단 표시)` : ` (전체 ${keys.length} 집단)`;
+
+  diagChart = new Chart(document.getElementById('diag-chart'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            filter: item => item.text !== '',
+            boxWidth: 10, font: { size: 10 }
+          }
+        },
+        title: { display: true, text: `집단별 회귀선: ${yName} ~ ${xName} (${gName})${truncNote}`, font: { size: 13 } }
+      },
+      scales: {
+        x: { title: { display: true, text: xName } },
+        y: { title: { display: true, text: yName } }
+      }
+    }
+  });
+}
+
+// ════════════════════════════════════════
+//  AI 보고서 생성
+// ════════════════════════════════════════
+let currentProvider = 'openai';
+let lastReportMarkdown = '';
+
+const AI_MODELS = {
+  openai: [
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+  ],
+  claude: [
+    { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+    { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
+  ],
+  local: [
+    { value: 'gemma3:27b', label: 'Gemma 3 27B' },
+    { value: 'gemma3:12b', label: 'Gemma 3 12B' },
+    { value: 'qwen2.5:14b', label: 'Qwen 2.5 14B' },
+    { value: 'llama3.1:8b', label: 'Llama 3.1 8B' },
+    { value: 'mistral:7b', label: 'Mistral 7B' },
+    { value: 'phi4:14b', label: 'Phi-4 14B' }
+  ]
+};
+
+function onAIProviderChange(provider) {
+  currentProvider = provider;
+
+  // 버튼 토글
+  document.querySelectorAll('.ai-provider-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById(`provider-btn-${provider}`).classList.add('selected');
+
+  // API 키 vs 엔드포인트 전환
+  const keyWrap = document.getElementById('ai-key-wrap');
+  const endpointWrap = document.getElementById('ai-endpoint-wrap');
+  const keyLabel = document.getElementById('ai-key-label');
+  const keyInput = document.getElementById('ai-api-key');
+
+  if (provider === 'local') {
+    keyWrap.style.display = 'none';
+    endpointWrap.style.display = '';
+    checkOllamaStatus();
+  } else {
+    keyWrap.style.display = '';
+    endpointWrap.style.display = 'none';
+    if (provider === 'openai') {
+      keyLabel.textContent = 'OpenAI API Key';
+      keyInput.placeholder = 'sk-...';
+    } else {
+      keyLabel.textContent = 'Anthropic API Key';
+      keyInput.placeholder = 'sk-ant-...';
+    }
+  }
+
+  // 모델 목록 갱신
+  const modelSel = document.getElementById('ai-model');
+  modelSel.innerHTML = '';
+  AI_MODELS[provider].forEach(m => {
+    modelSel.innerHTML += `<option value="${m.value}">${m.label}</option>`;
+  });
+
+  validateGenerateBtn();
+}
+
+async function checkOllamaStatus() {
+  const icon = document.getElementById('ollama-status-icon');
+  const text = document.getElementById('ollama-status-text');
+  const wrap = document.getElementById('ai-endpoint-wrap');
+  icon.textContent = '⏳';
+  text.textContent = '확인 중...';
+  wrap.querySelector('.ctrl').style.background = '#f1f5f9';
+  wrap.querySelector('.ctrl').style.color = 'var(--muted)';
+
+  try {
+    const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    const data = await res.json();
+    const models = (data.models || []).map(m => m.name);
+
+    if (models.length === 0) {
+      icon.textContent = '⚠️';
+      text.textContent = 'Ollama 실행 중이나 설치된 모델 없음';
+      wrap.querySelector('.ctrl').style.background = '#fef3c7';
+      wrap.querySelector('.ctrl').style.color = '#92400e';
+      return;
+    }
+
+    icon.textContent = '✅';
+    text.textContent = `연결됨 · ${models.length}개 모델`;
+    wrap.querySelector('.ctrl').style.background = '#f0fdf4';
+    wrap.querySelector('.ctrl').style.color = '#059669';
+
+    // 모델 드롭다운을 실제 설치된 모델로 갱신
+    const modelSel = document.getElementById('ai-model');
+    modelSel.innerHTML = '';
+    models.forEach(m => {
+      modelSel.innerHTML += `<option value="${m}">${m}</option>`;
+    });
+  } catch {
+    icon.textContent = '❌';
+    text.textContent = 'Ollama 연결 실패 (localhost:11434)';
+    wrap.querySelector('.ctrl').style.background = '#fee2e2';
+    wrap.querySelector('.ctrl').style.color = '#991b1b';
+  }
+}
+
+function validateGenerateBtn() {
+  const btn = document.getElementById('btn-generate');
+  if (!lastResult) { btn.disabled = true; return; }
+
+  if (currentProvider === 'local') {
+    btn.disabled = false;
+  } else {
+    const key = document.getElementById('ai-api-key').value.trim();
+    btn.disabled = !key;
+  }
+}
+
+function formatFixedEffectsText(fes) {
+  if (!fes || fes.length === 0) return '  (고정효과 없음)\n';
+  let text = '';
+  fes.forEach(fe => {
+    const sig = fe.p != null ? (fe.p < .001 ? '***' : fe.p < .01 ? '**' : fe.p < .05 ? '*' : fe.p < .1 ? '†' : '') : '';
+    const ci = (fe.ci_lower != null && fe.ci_upper != null) ? ` [${fmt(fe.ci_lower)}, ${fmt(fe.ci_upper)}]` : '';
+    text += `  - ${fe.term}: B = ${fmt(fe.estimate)}, SE = ${fmt(fe.se)}, t = ${fmt(fe.t)}, p = ${fmt(fe.p)}${sig}${ci}\n`;
+  });
+  return text;
+}
+
+function formatRandomEffectsText(res) {
+  if (!res || res.length === 0) return '  (무선효과 없음)\n';
+  let text = '';
+  res.forEach(re => {
+    const isCov = re.var2 && re.var2 !== '';
+    if (isCov) {
+      text += `  - ${re.group} | ${re.var1} & ${re.var2}: 공분산 = ${fmt(re.vcov)}, 상관 = ${fmt(re.sdcor)}\n`;
+    } else {
+      text += `  - ${re.group} | ${re.var1 || 'Intercept'}: 분산 = ${fmt(re.vcov)}, SD = ${fmt(re.sdcor)}\n`;
+    }
+  });
+  return text;
+}
+
+function buildAIPrompt() {
+  const d = lastResult;
+  const lang = document.getElementById('ai-lang').value;
+  const style = document.getElementById('ai-style').value;
+  const context = document.getElementById('ai-context').value.trim();
+
+  // 데이터 정보
+  const info = d.data_info;
+  let dataText = `데이터 개요:\n`;
+  dataText += `  - 총 관측치: ${u(info.n_obs)}\n`;
+  dataText += `  - 집단 수: ${u(info.n_groups)}\n`;
+  dataText += `  - 집단당 평균 관측치: ${(u(info.n_obs) / u(info.n_groups)).toFixed(1)}\n`;
+  dataText += `  - 종속변수: ${u(info.outcome)}\n`;
+  dataText += `  - 집단변수: ${u(info.group_var)}\n`;
+
+  // 기저모형 (M0)
+  let nullText = '';
+  if (d.null_model) {
+    const m = d.null_model;
+    nullText = `\n기저모형 (Model 0 - Null Model):\n`;
+    nullText += `  - ICC: ${m.icc ?? 'N/A'}\n`;
+    nullText += `  - AIC: ${m.fit.AIC}, BIC: ${m.fit.BIC}, Deviance: ${m.fit.deviance}\n`;
+    nullText += `  - 공식: ${m.formula}\n`;
+    nullText += `  무선효과:\n${formatRandomEffectsText(m.random_effects)}`;
+  }
+
+  // 무선절편 모형 (M1)
+  let riText = '';
+  if (d.ri_model) {
+    const m = d.ri_model;
+    riText = `\n무선절편 모형 (Model 1 - Random Intercept):\n`;
+    riText += `  - ICC: ${m.icc ?? 'N/A'}\n`;
+    if (m.r2) riText += `  - R² marginal: ${m.r2.marginal}, R² conditional: ${m.r2.conditional}\n`;
+    riText += `  - AIC: ${m.fit.AIC}, BIC: ${m.fit.BIC}, Deviance: ${m.fit.deviance}\n`;
+    riText += `  - 공식: ${m.formula}\n`;
+    riText += `  고정효과:\n${formatFixedEffectsText(m.fixed_effects)}`;
+    riText += `  무선효과:\n${formatRandomEffectsText(m.random_effects)}`;
+    if (m.lrt_vs_null) {
+      riText += `  LRT vs 기저모형: χ²(${m.lrt_vs_null.df}) = ${fmt(m.lrt_vs_null.chi2)}, p = ${fmt(m.lrt_vs_null.p)}\n`;
+    }
+  }
+
+  // 무선기울기 모형 (M2)
+  let rsText = '';
+  if (d.rs_model) {
+    const m = d.rs_model;
+    rsText = `\n무선기울기 모형 (Model 2 - Random Slope):\n`;
+    rsText += `  - ICC: ${m.icc ?? 'N/A'}\n`;
+    if (m.r2) rsText += `  - R² marginal: ${m.r2.marginal}, R² conditional: ${m.r2.conditional}\n`;
+    rsText += `  - AIC: ${m.fit.AIC}, BIC: ${m.fit.BIC}, Deviance: ${m.fit.deviance}\n`;
+    rsText += `  - 공식: ${m.formula}\n`;
+    rsText += `  고정효과:\n${formatFixedEffectsText(m.fixed_effects)}`;
+    rsText += `  무선효과:\n${formatRandomEffectsText(m.random_effects)}`;
+    if (m.lrt_vs_ri) {
+      rsText += `  LRT vs 무선절편모형: χ²(${m.lrt_vs_ri.df}) = ${fmt(m.lrt_vs_ri.chi2)}, p = ${fmt(m.lrt_vs_ri.p)}\n`;
+    }
+  } else if (d.rs_model_error) {
+    rsText = `\n무선기울기 모형: 수렴 실패 - ${d.rs_model_error}\n`;
+  }
+
+  // 교차수준 상호작용 모형 (M3)
+  let clText = '';
+  if (d.cl_model) {
+    const m = d.cl_model;
+    clText = `\n교차수준 상호작용 모형 (Model 3 - Cross-Level Interaction):\n`;
+    clText += `  - ICC: ${m.icc ?? 'N/A'}\n`;
+    if (m.r2) clText += `  - R² marginal: ${m.r2.marginal}, R² conditional: ${m.r2.conditional}\n`;
+    clText += `  - AIC: ${m.fit.AIC}, BIC: ${m.fit.BIC}, Deviance: ${m.fit.deviance}\n`;
+    clText += `  - 공식: ${m.formula}\n`;
+    const intTerms = m.interaction_terms || [];
+    if (intTerms.length > 0) clText += `  - 상호작용 항: ${Array.isArray(intTerms) ? intTerms.join(', ') : intTerms}\n`;
+    clText += `  고정효과:\n${formatFixedEffectsText(m.fixed_effects)}`;
+    clText += `  무선효과:\n${formatRandomEffectsText(m.random_effects)}`;
+    if (m.lrt_vs_prev) {
+      clText += `  LRT vs 이전 모형: χ²(${m.lrt_vs_prev.df}) = ${fmt(m.lrt_vs_prev.chi2)}, p = ${fmt(m.lrt_vs_prev.p)}\n`;
+    }
+  } else if (d.cl_model_error) {
+    clText = `\n교차수준 상호작용 모형: 수렴 실패 - ${d.cl_model_error}\n`;
+  }
+
+  // 모형 비교
+  let compText = '';
+  if (d.model_comparison && d.model_comparison.length > 0) {
+    compText = `\n모형 비교:\n`;
+    d.model_comparison.forEach(m => {
+      compText += `  - ${m.name}: AIC=${fmt(m.AIC)}, BIC=${fmt(m.BIC)}, Deviance=${fmt(m.deviance)}`;
+      if (m.chi2 != null && !isNaN(m.chi2)) compText += `, χ²=${fmt(m.chi2)}, df=${m.df_chi}, p=${fmt(m.p_chi)}`;
+      compText += '\n';
+    });
+  }
+
+  // R 코드 (api에서 제공)
+  let rcodeText = '';
+  if (d.r_code) {
+    rcodeText = `\n\n실제 사용된 R 코드:\n\`\`\`r\n${d.r_code}\n\`\`\`\n`;
+  }
+
+  const fullData = dataText + nullText + riText + rsText + clText + compText + rcodeText;
+
+  // 스타일별 지시문
+  const styleInstructions = {
+    academic: lang === 'ko'
+      ? '학술 논문 스타일로 작성하세요. APA 형식에 맞게 결과를 보고하고, 통계값을 정확히 표기하세요. 서론(연구 맥락), 방법(분석 전략), 결과(모형별 상세), 논의(해석 및 함의) 순으로 구성하세요.'
+      : 'Write in academic paper style following APA format. Report statistics precisely. Structure: Introduction (context), Method (analytic strategy), Results (detailed by model), Discussion (interpretation and implications).',
+    summary: lang === 'ko'
+      ? '핵심 결과를 간결하게 요약하세요. 주요 발견, 통계적 유의성, 실질적 의미를 중심으로 1~2페이지 분량으로 작성하세요.'
+      : 'Summarize key findings concisely. Focus on main results, statistical significance, and practical implications in 1-2 pages.',
+    detailed: lang === 'ko'
+      ? '모든 모형의 결과를 상세하게 기술하세요. 각 모형의 적합도 비교, 고정효과와 무선효과의 의미, 모형 선택 근거를 포함하세요. 교육적 설명을 포함하여 비전문가도 이해할 수 있게 작성하세요.'
+      : 'Describe all model results in detail. Include fit comparison, interpretation of fixed and random effects, and model selection rationale. Include educational explanations accessible to non-specialists.'
+  };
+
+  const langInstruction = lang === 'ko'
+    ? '반드시 한국어(한글)로만 작성하세요. 중국어(漢字), 일본어, 베트남어 등 다른 문자를 절대 섞지 마세요. 통계 용어도 모두 한글로 표기하세요(예: 데이터, 통계학, 분석, 상관관계).'
+    : 'Write in English only.';
+
+  const rcodeInstruction = d.r_code
+    ? ' 보고서 마지막에 "부록: R 코드" 섹션을 추가하고, 제공된 R 코드를 아주 상세한 한국어 주석과 함께 포함하세요. 각 코드 줄마다 무엇을 하는지, 왜 하는지를 설명하는 주석을 달아주세요.'
+    : '';
+  const systemPrompt = `You are an expert statistician specializing in multilevel modeling (HLM/MLM). ${langInstruction} ${styleInstructions[style]} Use Markdown formatting with headers (#, ##, ###), bold, italic, lists, and tables where appropriate. Statistical terms and numbers should use standard notation (e.g., p < .05, β = 0.32).${rcodeInstruction}${context ? ` Additional context: ${context}` : ''}`;
+
+  const userPrompt = `다음 다층모형(MLM) 분석 결과를 바탕으로 보고서를 작성해주세요:\n\n${fullData}`;
+
+  return { systemPrompt, userPrompt };
+}
+
+async function generateReport() {
+  if (!lastResult) { alert('먼저 분석을 실행해 주세요.'); return; }
+
+  const loadingEl = document.getElementById('report-loading');
+  const previewSection = document.getElementById('report-preview-section');
+  const btn = document.getElementById('btn-generate');
+
+  loadingEl.style.display = 'block';
+  previewSection.style.display = 'none';
+  btn.disabled = true;
+
+  try {
+    const { systemPrompt, userPrompt } = buildAIPrompt();
+    let markdown;
+
+    if (currentProvider === 'claude') {
+      markdown = await callClaude(systemPrompt, userPrompt);
+    } else {
+      markdown = await callOpenAICompatible(systemPrompt, userPrompt);
+    }
+
+    lastReportMarkdown = markdown;
+    renderReportPreview(markdown);
+    previewSection.style.display = '';
+    previewSection.scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    alert('AI 보고서 생성 실패: ' + e.message);
+  } finally {
+    loadingEl.style.display = 'none';
+    btn.disabled = false;
+    validateGenerateBtn();
+  }
+}
+
+async function callOpenAICompatible(systemPrompt, userPrompt) {
+  const model = document.getElementById('ai-model').value;
+  let baseUrl;
+
+  if (currentProvider === 'local') {
+    baseUrl = 'http://localhost:11434/v1';
+  } else {
+    baseUrl = 'https://api.openai.com/v1';
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (currentProvider === 'openai') {
+    headers['Authorization'] = `Bearer ${document.getElementById('ai-api-key').value.trim()}`;
+  }
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 4096
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`API 오류 (${res.status}): ${err.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+async function callClaude(systemPrompt, userPrompt) {
+  const apiKey = document.getElementById('ai-api-key').value.trim();
+  const model = document.getElementById('ai-model').value;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: userPrompt }
+      ]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Claude API 오류 (${res.status}): ${err.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+function renderReportPreview(markdown) {
+  // 마크다운 → HTML 변환 (간이 파서)
+  let html = markdown
+    // 코드 블록
+    .replace(/```[\s\S]*?```/g, m => {
+      const code = m.slice(3, -3).replace(/^\w*\n/, '');
+      return `<pre style="background:#f1f5f9;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px"><code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`;
+    })
+    // 인라인 코드
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // 헤더
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // 굵게 / 기울임
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // 인용
+    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    // 수평선
+    .replace(/^---+$/gm, '<hr>')
+    // 테이블 처리
+    .replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)+)/gm, (match, header, sep, body) => {
+      const ths = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+      const rows = body.trim().split('\n').map(row => {
+        const tds = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      return `<table><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`;
+    })
+    // 순서 없는 목록
+    .replace(/^[*\-] (.+)$/gm, '<li>$1</li>')
+    // 순서 있는 목록
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // 연속 li를 ul로 감싸기
+    .replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+    // 줄바꿈 → 단락
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+
+  html = '<p>' + html + '</p>';
+  // 빈 p 제거
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  // p 안의 블록 요소 정리
+  html = html.replace(/<p>\s*(<h[1-3]>)/g, '$1');
+  html = html.replace(/(<\/h[1-3]>)\s*<\/p>/g, '$1');
+  html = html.replace(/<p>\s*(<table>)/g, '$1');
+  html = html.replace(/(<\/table>)\s*<\/p>/g, '$1');
+  html = html.replace(/<p>\s*(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
+  html = html.replace(/<p>\s*(<pre)/g, '$1');
+  html = html.replace(/(<\/pre>)\s*<\/p>/g, '$1');
+  html = html.replace(/<p>\s*(<blockquote>)/g, '$1');
+  html = html.replace(/(<\/blockquote>)\s*<\/p>/g, '$1');
+  html = html.replace(/<p>\s*(<hr>)/g, '$1');
+  html = html.replace(/(<hr>)\s*<\/p>/g, '$1');
+
+  document.getElementById('report-preview-content').innerHTML = html;
+}
+
+function parseInlineFormatting(text) {
+  const { TextRun } = docx;
+  const runs = [];
+  const regex = /\*\*(.+?)\*\*|\*(.+?)\*|([^*]+)/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m[1]) {
+      runs.push(new TextRun({ text: m[1], bold: true, font: 'Malgun Gothic', size: 22 }));
+    } else if (m[2]) {
+      runs.push(new TextRun({ text: m[2], italics: true, font: 'Malgun Gothic', size: 22 }));
+    } else if (m[3]) {
+      runs.push(new TextRun({ text: m[3], font: 'Malgun Gothic', size: 22 }));
+    }
+  }
+  return runs.length > 0 ? runs : [new TextRun({ text, font: 'Malgun Gothic', size: 22 })];
+}
+
+function downloadWordReport() {
+  if (!lastReportMarkdown) { alert('보고서가 아직 생성되지 않았습니다.'); return; }
+
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle } = docx;
+
+  const lines = lastReportMarkdown.split('\n');
+  const children = [];
+
+  // 제목
+  children.push(new Paragraph({
+    children: [new TextRun({
+      text: '다층모형(MLM) 분석 보고서',
+      font: 'Malgun Gothic', size: 32, bold: true, color: '1e3a5f'
+    })],
+    heading: HeadingLevel.TITLE,
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 200 }
+  }));
+
+  // 메타 정보
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  children.push(new Paragraph({
+    children: [new TextRun({
+      text: `생성일: ${dateStr}  |  AI: ${currentProvider.toUpperCase()}  |  모델: ${document.getElementById('ai-model').value}`,
+      font: 'Malgun Gothic', size: 18, color: '64748b', italics: true
+    })],
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 400 }
+  }));
+
+  // 본문 파싱
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // 빈 줄
+    if (line.trim() === '') {
+      children.push(new Paragraph({ spacing: { after: 100 } }));
+      continue;
+    }
+
+    // 테이블 구분선 (스킵)
+    if (/^\|[-| :]+\|$/.test(line.trim())) continue;
+
+    // 헤더
+    if (line.startsWith('### ')) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: line.slice(4), font: 'Malgun Gothic', size: 24, bold: true, color: '1e293b' })],
+        heading: HeadingLevel.HEADING_3,
+        spacing: { before: 200, after: 100 }
+      }));
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: line.slice(3), font: 'Malgun Gothic', size: 26, bold: true, color: '1e3a5f' })],
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 300, after: 120 }
+      }));
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: line.slice(2), font: 'Malgun Gothic', size: 30, bold: true, color: '1e3a5f' })],
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 400, after: 150 }
+      }));
+      continue;
+    }
+
+    // 수평선
+    if (/^---+$/.test(line.trim())) {
+      children.push(new Paragraph({
+        border: { bottom: { color: 'e2e8f0', space: 1, style: BorderStyle.SINGLE, size: 6 } },
+        spacing: { before: 200, after: 200 }
+      }));
+      continue;
+    }
+
+    // 리스트 항목
+    if (/^[*\-] /.test(line)) {
+      const content = line.replace(/^[*\-] /, '');
+      children.push(new Paragraph({
+        children: parseInlineFormatting(content),
+        bullet: { level: 0 },
+        spacing: { after: 60 }
+      }));
+      continue;
+    }
+    if (/^\d+\. /.test(line)) {
+      const content = line.replace(/^\d+\. /, '');
+      children.push(new Paragraph({
+        children: parseInlineFormatting(content),
+        numbering: { reference: 'default-numbering', level: 0 },
+        spacing: { after: 60 }
+      }));
+      continue;
+    }
+
+    // 인용
+    if (line.startsWith('> ')) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: line.slice(2), font: 'Malgun Gothic', size: 22, italics: true, color: '64748b' })],
+        indent: { left: 720 },
+        spacing: { after: 100 }
+      }));
+      continue;
+    }
+
+    // 일반 텍스트
+    children.push(new Paragraph({
+      children: parseInlineFormatting(line),
+      spacing: { after: 80 }
+    }));
+  }
+
+  const doc = new Document({
+    numbering: {
+      config: [{
+        reference: 'default-numbering',
+        levels: [{
+          level: 0,
+          format: 'decimal',
+          text: '%1.',
+          alignment: AlignmentType.START
+        }]
+      }]
+    },
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+        }
+      },
+      children
+    }]
+  });
+
+  Packer.toBlob(doc).then(blob => {
+    saveAs(blob, `MLM_Report_${dateStr}.docx`);
+  }).catch(err => {
+    alert('Word 파일 생성 실패: ' + err.message);
+  });
+}
+
+function copyReportToClipboard() {
+  if (!lastReportMarkdown) { alert('보고서가 아직 생성되지 않았습니다.'); return; }
+  navigator.clipboard.writeText(lastReportMarkdown).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✅ 복사됨!';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  }).catch(err => {
+    // 폴백
+    const ta = document.createElement('textarea');
+    ta.value = lastReportMarkdown;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✅ 복사됨!';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
   });
 }
 </script>
