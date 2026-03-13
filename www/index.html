@@ -778,7 +778,8 @@ const u = v => Array.isArray(v) ? v[0] : v;
 // ════════════════════════════════════════
 //  전역 상태
 // ════════════════════════════════════════
-const API_BASE = 'http://localhost:8001';
+// API 주소를 현재 접속한 호스트에서 자동 감지 (로컬/클라우드 모두 호환)
+const API_BASE = window.location.origin;
 let parsedData   = [];   // 원본 행 배열
 let columnData   = {};   // 컬럼 형식 { colName: [values...] }
 let allColumns   = [];

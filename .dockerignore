@@ -1,0 +1,12 @@
+.git
+.gitignore
+README.md
+render.yaml
+run.bat
+*.log
+*.tmp
+.Rhistory
+.RData
+.Rdata
+.Ruserdata
+.Rproj.user/

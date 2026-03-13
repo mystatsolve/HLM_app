@@ -1,0 +1,14 @@
+# render.yaml - Render.com 배포 설정 (Blueprint)
+# Render 대시보드에서 "New Blueprint Instance"로 이 파일을 사용하면
+# 자동으로 서비스가 생성됩니다.
+
+services:
+  - type: web
+    name: hlm-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8001
